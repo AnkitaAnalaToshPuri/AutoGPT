@@ -81,7 +81,6 @@ export function rateUnitLabel(trackingType: string | null | undefined): string {
       return "$/item";
     case "sandbox_seconds":
     case "walltime_seconds":
-    case "duration_seconds":
       return "$/second";
     case "per_run":
       return "$/run";
@@ -104,7 +103,6 @@ export function defaultRateFor(
       return DEFAULT_COST_PER_ITEM[provider] ?? null;
     case "sandbox_seconds":
     case "walltime_seconds":
-    case "duration_seconds":
       return DEFAULT_COST_PER_SECOND[provider] ?? null;
     case "per_run":
       return DEFAULT_COST_PER_RUN[provider] ?? null;
@@ -158,7 +156,6 @@ export function estimateCostForRow(
       break;
     case "sandbox_seconds":
     case "walltime_seconds":
-    case "duration_seconds":
       amount = row.total_duration_seconds || 0;
       break;
     case "per_run":
@@ -180,11 +177,7 @@ export function trackingValue(row: ProviderCostSummary) {
     const tokens = row.total_input_tokens + row.total_output_tokens;
     return `${formatTokens(tokens)} tokens`;
   }
-  if (
-    tt === "duration_seconds" ||
-    tt === "sandbox_seconds" ||
-    tt === "walltime_seconds"
-  )
+  if (tt === "sandbox_seconds" || tt === "walltime_seconds")
     return formatDuration(row.total_duration_seconds || 0);
   if (tt === "characters")
     return `${formatTokens(Math.round(row.total_tracking_amount || 0))} chars`;

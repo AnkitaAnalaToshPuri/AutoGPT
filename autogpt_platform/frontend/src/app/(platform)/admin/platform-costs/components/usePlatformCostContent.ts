@@ -58,23 +58,36 @@ export function usePlatformCostContent(searchParams: InitialSearchParams) {
       if (providerFilter) filters.provider = providerFilter;
       if (userFilter) filters.user_id = userFilter;
 
-      try {
-        const [dashData, logsData] = await Promise.all([
-          getPlatformCostDashboard(filters),
-          getPlatformCostLogs({ ...filters, page, page_size: 50 }),
-        ]);
-        if (dashData) setDashboard(dashData);
-        if (logsData) {
-          setLogs((logsData as PlatformCostLogsResponse).logs || []);
-          setPagination(
-            (logsData as PlatformCostLogsResponse).pagination || null,
-          );
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load cost data");
-      } finally {
-        setLoading(false);
+      const [dashResult, logsResult] = await Promise.allSettled([
+        getPlatformCostDashboard(filters),
+        getPlatformCostLogs({ ...filters, page, page_size: 50 }),
+      ]);
+
+      if (dashResult.status === "fulfilled") {
+        if (dashResult.value) setDashboard(dashResult.value);
+      } else {
+        setError(
+          dashResult.reason instanceof Error
+            ? dashResult.reason.message
+            : "Failed to load dashboard data",
+        );
       }
+
+      if (logsResult.status === "fulfilled") {
+        const logsData = logsResult.value as PlatformCostLogsResponse | null;
+        if (logsData) {
+          setLogs(logsData.logs || []);
+          setPagination(logsData.pagination || null);
+        }
+      } else {
+        setError(
+          logsResult.reason instanceof Error
+            ? logsResult.reason.message
+            : "Failed to load logs data",
+        );
+      }
+
+      setLoading(false);
     }
     load();
   }, [startDate, endDate, providerFilter, userFilter, page]);

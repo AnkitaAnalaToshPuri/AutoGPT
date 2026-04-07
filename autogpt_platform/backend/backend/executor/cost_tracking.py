@@ -85,6 +85,21 @@ def _schedule_log(
     task.add_done_callback(_pending_log_tasks.discard)
 
 
+def _extract_model_name(raw: Any) -> str | None:
+    """Return a string model name from a block input field, or None.
+
+    Handles str (returned as-is), dict (e.g. an enum wrapper, skipped), and
+    any other type (coerced to str as a best-effort fallback).
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return None
+    return str(raw)
+
+
 def resolve_tracking(
     provider: str,
     stats: NodeExecutionStats,
@@ -176,11 +191,7 @@ async def log_system_credential_cost(
             if not cred_id or not is_system_credential(cred_id):
                 continue
 
-            model_name = input_data.get("model")
-            if model_name is not None and not isinstance(model_name, str):
-                model_name = (
-                    str(model_name) if not isinstance(model_name, dict) else None
-                )
+            model_name = _extract_model_name(input_data.get("model"))
 
             credit_cost, _ = block_usage_cost(block=block, input_data=input_data)
 

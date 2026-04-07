@@ -1,6 +1,7 @@
 "use client";
 
 import { Alert, AlertDescription } from "@/components/molecules/Alert/Alert";
+import { Skeleton } from "@/components/atoms/Skeleton/Skeleton";
 import { formatMicrodollars } from "../helpers";
 import { SummaryCard } from "./SummaryCard";
 import { ProviderTable } from "./ProviderTable";
@@ -134,8 +135,14 @@ function PlatformCostContent({ searchParams }: Props) {
       )}
 
       {loading ? (
-        <div className="py-10 text-center text-muted-foreground">
-          Loading...
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            {[...Array(4)].map((_, i) => (
+              <Skeleton key={i} className="h-20 rounded-lg" />
+            ))}
+          </div>
+          <Skeleton className="h-8 w-48 rounded" />
+          <Skeleton className="h-64 rounded-lg" />
         </div>
       ) : (
         <>
@@ -175,7 +182,7 @@ function PlatformCostContent({ searchParams }: Props) {
                 aria-selected={tab === t}
                 aria-controls={`tabpanel-${t}`}
                 onClick={() => updateUrl({ tab: t, page: "1" })}
-                className={`px-4 py-2 text-sm font-medium ${tab === t ? "border-b-2 border-blue-600 text-blue-600" : "text-muted-foreground hover:text-foreground"}`}
+                className={`px-4 py-2 text-sm font-medium ${tab === t ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground"}`}
               >
                 {t === "overview"
                   ? "By Provider"

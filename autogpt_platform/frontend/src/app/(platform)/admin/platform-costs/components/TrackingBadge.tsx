@@ -6,7 +6,6 @@ function TrackingBadge({
   const colors: Record<string, string> = {
     cost_usd: "bg-green-500/10 text-green-700",
     tokens: "bg-blue-500/10 text-blue-700",
-    duration_seconds: "bg-orange-500/10 text-orange-700",
     characters: "bg-purple-500/10 text-purple-700",
     sandbox_seconds: "bg-orange-500/10 text-orange-700",
     walltime_seconds: "bg-orange-500/10 text-orange-700",
