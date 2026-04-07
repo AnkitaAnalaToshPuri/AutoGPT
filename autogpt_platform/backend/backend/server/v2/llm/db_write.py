@@ -234,7 +234,11 @@ async def update_model(
     capabilities: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> prisma.models.LlmModel:
-    """Update an existing LLM model."""
+    """Update an existing LLM model.
+
+    When is_recommended=True, clears the flag on all other models first so
+    only one model can be recommended at a time.
+    """
     # Build update data (only include fields that are provided)
     data: dict[str, Any] = {}
     if display_name is not None:
@@ -266,11 +270,20 @@ async def update_model(
     if creator_id is not None:
         data["creatorId"] = creator_id if creator_id else None
 
-    model = await prisma.models.LlmModel.prisma().update(
-        where={"id": model_id},
-        data=data,
-        include={"Costs": True, "Creator": True, "Provider": True},
-    )
+    async with transaction() as tx:
+        # Enforce single recommended model: unset all others first.
+        if is_recommended is True:
+            await tx.llmmodel.update_many(
+                where={"id": {"not": model_id}},
+                data={"isRecommended": False},
+            )
+
+        model = await tx.llmmodel.update(
+            where={"id": model_id},
+            data=data,
+            include={"Costs": True, "Creator": True, "Provider": True},
+        )
+
     if not model:
         raise ValueError(f"Model with id '{model_id}' not found")
     return model
