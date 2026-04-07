@@ -12,6 +12,7 @@ This module extracts that common logic so both paths stay in sync.
 import asyncio
 import logging
 import re
+import threading
 
 from backend.data.db_accessors import platform_cost_db
 from backend.data.platform_cost import PlatformCostEntry, usd_to_microdollars
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 # Hold strong references to in-flight cost log tasks to prevent GC.
 _pending_log_tasks: set[asyncio.Task[None]] = set()
+# Guards all reads and writes to _pending_log_tasks. Done callbacks (discard)
+# fire from the event loop thread; drain_pending_cost_logs iterates the set
+# from any caller — the lock prevents RuntimeError from concurrent modification.
+_pending_log_tasks_lock = threading.Lock()
 # Per-loop semaphores: asyncio.Semaphore is not thread-safe and must not be
 # shared across event loops running in different threads.
 _log_semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
@@ -53,8 +58,14 @@ def _schedule_cost_log(entry: PlatformCostEntry) -> None:
                 )
 
     task = asyncio.create_task(_safe_log())
-    _pending_log_tasks.add(task)
-    task.add_done_callback(_pending_log_tasks.discard)
+    with _pending_log_tasks_lock:
+        _pending_log_tasks.add(task)
+
+    def _remove(t: asyncio.Task[None]) -> None:
+        with _pending_log_tasks_lock:
+            _pending_log_tasks.discard(t)
+
+    task.add_done_callback(_remove)
 
 
 # Identifiers used by PlatformCostLog for copilot turns (not tied to a real

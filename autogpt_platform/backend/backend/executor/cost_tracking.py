@@ -86,8 +86,11 @@ async def drain_pending_cost_logs(timeout: float = 5.0) -> None:
     from backend.copilot.token_tracking import (  # noqa: PLC0415
         _pending_log_tasks as _copilot_tasks,
     )
+    from backend.copilot.token_tracking import (  # noqa: PLC0415
+        _pending_log_tasks_lock as _copilot_tasks_lock,
+    )
 
-    with _pending_log_tasks_lock:
+    with _copilot_tasks_lock:
         copilot_pending = [t for t in _copilot_tasks if t.get_loop() is current_loop]
     if copilot_pending:
         logger.info("Draining %d copilot cost log task(s)", len(copilot_pending))
