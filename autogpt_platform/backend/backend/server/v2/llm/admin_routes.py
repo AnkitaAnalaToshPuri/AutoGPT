@@ -302,16 +302,26 @@ async def toggle_model(
                 status_code=404, detail=f"Model with slug '{slug}' not found"
             )
 
+        is_enabling = request.get("is_enabled", True)
+        if not is_enabling and existing.isRecommended:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot disable the recommended model. "
+                    "Change the recommended model before disabling this one."
+                ),
+            )
+
         result = await db_write.toggle_model_with_migration(
             model_id=existing.id,
-            is_enabled=request.get("is_enabled", True),
+            is_enabled=is_enabling,
             migrate_to_slug=request.get("migrate_to_slug"),
             migration_reason=request.get("migration_reason"),
             custom_credit_cost=request.get("custom_credit_cost"),
         )
         await db_write.refresh_runtime_caches()
         logger.info(
-            f"Toggled model '{slug}' enabled={request.get('is_enabled')} "
+            f"Toggled model '{slug}' enabled={is_enabling} "
             f"(migrated {result['nodes_migrated']} nodes)"
         )
         return result
