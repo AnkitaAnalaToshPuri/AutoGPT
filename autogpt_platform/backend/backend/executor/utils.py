@@ -31,7 +31,12 @@ from backend.data.execution import (
     NodesInputMasks,
 )
 from backend.data.graph import GraphModel, Node
-from backend.data.model import USER_TIMEZONE_NOT_SET, CredentialsMetaInput, GraphInput
+from backend.data.model import (
+    USER_TIMEZONE_NOT_SET,
+    CredentialsMetaInput,
+    GraphInput,
+    User,
+)
 from backend.data.rabbitmq import Exchange, ExchangeType, Queue, RabbitMQConfig
 from backend.util.clients import (
     get_async_execution_event_bus,
@@ -962,7 +967,7 @@ async def add_graph_execution(
 
     # Generate execution context if it's not provided
     if execution_context is None:
-        user = await udb.get_user_by_id(user_id)
+        user = User.model_validate(await udb.get_user_by_id(user_id))
         settings = await gdb.get_graph_settings(user_id=user_id, graph_id=graph_id)
         workspace = await wdb.get_or_create_workspace(user_id)
 
