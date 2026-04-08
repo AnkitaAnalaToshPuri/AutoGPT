@@ -154,6 +154,8 @@ async def create_model(
             include={"Costs": True, "Creator": True},
         )
         return _map_model_response(model)
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Model creation validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -206,6 +208,8 @@ async def update_model(
         await db_write.refresh_runtime_caches()
         logger.info(f"Updated model '{slug}' (id: {model.id})")
         return _map_model_response(model)
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Model update validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -248,6 +252,8 @@ async def delete_model(
             f"Deleted model '{slug}' (migrated {result['nodes_migrated']} nodes)"
         )
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Model deletion validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -309,6 +315,8 @@ async def toggle_model(
             f"(migrated {result['nodes_migrated']} nodes)"
         )
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Model toggle failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -436,6 +444,8 @@ async def update_provider(
         await db_write.refresh_runtime_caches()
         logger.info(f"Updated provider '{name}' (id: {provider.id})")
         return _map_provider_response(provider)
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Provider update validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -472,6 +482,8 @@ async def delete_provider(
         await db_write.delete_provider(provider_id=existing.id)
         await db_write.refresh_runtime_caches()
         logger.info(f"Deleted provider '{name}' (id: {existing.id})")
+    except HTTPException:
+        raise
     except ValueError as e:
         logger.warning(f"Provider deletion validation failed: {e}")
         raise HTTPException(status_code=400, detail=str(e))
