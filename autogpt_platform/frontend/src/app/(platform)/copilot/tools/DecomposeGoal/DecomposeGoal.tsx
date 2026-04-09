@@ -56,7 +56,7 @@ export function DecomposeGoalTool({ part, isLastMessage }: Props) {
   const output = getDecomposeGoalOutput(part);
   const isError =
     part.state === "output-error" || (!!output && isErrorOutput(output));
-  const isPending = !output;
+  const isPending = !output && !isError;
 
   const showActions =
     !!isLastMessage &&
@@ -80,7 +80,10 @@ export function DecomposeGoalTool({ part, isLastMessage }: Props) {
 
   function buildMessage() {
     if (isEditingRef.current && editableStepsRef.current.length > 0) {
-      const list = editableStepsRef.current
+      const filledSteps = editableStepsRef.current.filter((s) =>
+        s.description.trim(),
+      );
+      const list = filledSteps
         .map((s, i) => `${i + 1}. ${s.description}`)
         .join("; ");
       return `Approved with modifications. Please build the agent following these steps: ${list}`;
