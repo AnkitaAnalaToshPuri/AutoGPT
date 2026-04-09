@@ -136,6 +136,72 @@ function isHelpCommand(text: string): boolean {
 }
 
 /**
+ * Whether this is a direct message (no "server" context).
+ * For Telegram: DM chat IDs are positive and match the user's ID.
+ * For Discord: DMs use a guild ID of "@me".
+ */
+function isDM(platform: string, serverId: string, platformUserId: string): boolean {
+  if (platform === "telegram") return !serverId.startsWith("-");
+  if (platform === "discord") return serverId === "@me";
+  return serverId === platformUserId;
+}
+
+/**
+ * Build context-aware copy for the setup message and confirm button.
+ * Returns strings appropriate for whether this is a personal DM link
+ * or a group/server link.
+ */
+function getLinkContext(
+  platform: string,
+  serverId: string,
+  platformUserId: string,
+): { isDirect: boolean; contextLabel: string; serverName: string | undefined } {
+  const PLATFORM_DISPLAY: Record<string, string> = {
+    discord: "Discord",
+    telegram: "Telegram",
+    slack: "Slack",
+  };
+  const display = PLATFORM_DISPLAY[platform] ?? platform;
+
+  if (isDM(platform, serverId, platformUserId)) {
+    return {
+      isDirect: true,
+      contextLabel: `your ${display} account`,
+      serverName: undefined,
+    };
+  }
+
+  return {
+    isDirect: false,
+    contextLabel: `this ${display} group`,
+    serverName: undefined,
+  };
+}
+
+/**
+ * Attempt to DM a user via bot.openDM().
+ * Returns true if the DM was sent, false if it failed (e.g. Telegram users
+ * who haven't started a private chat with the bot, or unknown user ID format).
+ */
+async function tryDM(
+  bot: Chat<Record<string, Adapter>, BotThreadState>,
+  message: Message,
+  text: string,
+): Promise<boolean> {
+  try {
+    const dmThread = await bot.openDM(message.author);
+    await dmThread.post(text);
+    return true;
+  } catch (err) {
+    console.log(
+      `[bot] DM unavailable for ${message.author.userId}, posting in thread instead:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
+/**
  * Handle a message in an unlinked server.
  * DMs the triggering user a one-time setup link — never posts in the channel.
  */
@@ -147,7 +213,15 @@ async function handleUnlinkedServer(
   api: PlatformAPI,
   bot: Chat<Record<string, Adapter>, BotThreadState>,
 ) {
-  console.log(`[bot] Server ${platform}:${serverId} not linked, sending setup DM`);
+  const { isDirect, contextLabel } = getLinkContext(
+    platform,
+    serverId,
+    message.author.userId,
+  );
+
+  console.log(
+    `[bot] ${isDirect ? "DM" : "Group"} ${platform}:${serverId} not linked, sending setup link`,
+  );
 
   try {
     const linkResult = await api.createLinkToken({
@@ -157,20 +231,24 @@ async function handleUnlinkedServer(
       platformUsername: message.author.fullName ?? message.author.userName,
     });
 
-    // Open a DM thread with the user and post the link privately
-    const dmThread = await bot.openDM(message.author);
-    await dmThread.post(
-      `👋 **Set up CoPilot for this server**\n\n` +
-        `Click below to connect your AutoGPT account. ` +
-        `Once done, everyone in the server can use CoPilot — ` +
-        `all usage will appear in your AutoGPT account.\n\n` +
-        `🔗 **Set up now:** ${linkResult.link_url}\n\n` +
-        `_This link expires in 30 minutes. Only you received this message._`,
-    );
+    const setupMessage = isDirect
+      ? `To use CoPilot, link ${contextLabel} to AutoGPT:\n\n${linkResult.link_url}\n\nThis link expires in 30 minutes.`
+      : `To set up CoPilot for ${contextLabel}, connect your AutoGPT account.\n\nOnce linked, everyone here can use CoPilot — usage appears in your AutoGPT account.\n\n${linkResult.link_url}\n\nThis link expires in 30 minutes.`;
 
-    await thread.post(
-      `👋 I've sent you a DM with a setup link! Once you've connected your AutoGPT account, everyone here can chat with CoPilot.`,
-    );
+    if (isDirect) {
+      // Already in a DM — post the link directly in this conversation
+      await thread.post(setupMessage);
+    } else {
+      // In a group — try to DM so the link isn't public, fall back to group post
+      const dmSent = await tryDM(bot, message, setupMessage);
+      if (dmSent) {
+        await thread.post(
+          `I've sent you a DM with a setup link! Once connected, everyone here can chat with CoPilot.`,
+        );
+      } else {
+        await thread.post(setupMessage);
+      }
+    }
 
     await thread.setState({ pendingLinkToken: linkResult.token });
   } catch (err) {
