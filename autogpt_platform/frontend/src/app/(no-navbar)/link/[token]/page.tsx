@@ -30,7 +30,7 @@ export default function PlatformLinkPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const token = params.token as string;
-  // Platform is passed as ?platform=DISCORD/TELEGRAM/etc. in the link URL
+  // Quick fallback: platform may be in ?platform= query param (new links)
   const platformFromUrl =
     PLATFORM_NAMES[searchParams.get("platform")?.toUpperCase() ?? ""] ?? null;
   const { user, isUserLoading, logOut } = useSupabase();
@@ -45,9 +45,18 @@ export default function PlatformLinkPage() {
       return;
     }
 
-    // Platform comes from the URL query param — no separate API call needed
+    // Show the page immediately with URL-param platform (may be null for old links),
+    // then fetch the real info from the backend which always has the correct platform.
     setState({ status: "ready", serverName: null, platform: platformFromUrl });
-  }, [token, user, isUserLoading, platformFromUrl]);
+
+    void fetchTokenInfo(token).then(({ platform, serverName }) => {
+      setState((prev) =>
+        prev.status === "ready"
+          ? { ...prev, platform: platform ?? prev.platform, serverName }
+          : prev,
+      );
+    });
+  }, [token, user, isUserLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleLink() {
     const serverName = state.status === "ready" ? state.serverName : null;
@@ -131,6 +140,29 @@ export default function PlatformLinkPage() {
       </div>
     </div>
   );
+}
+
+async function fetchTokenInfo(
+  token: string,
+): Promise<{ platform: string | null; serverName: string | null }> {
+  try {
+    const res = await fetch(
+      `/api/proxy/api/platform-linking/tokens/${token}/info`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    if (!res.ok) return { platform: null, serverName: null };
+    const data = await res.json();
+    const platform =
+      PLATFORM_NAMES[
+        (data.platform as string | undefined)?.toUpperCase() ?? ""
+      ] ?? null;
+    return {
+      platform,
+      serverName: (data.server_name as string | null) ?? null,
+    };
+  } catch {
+    return { platform: null, serverName: null };
+  }
 }
 
 function LoadingView() {
