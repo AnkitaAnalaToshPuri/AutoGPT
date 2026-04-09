@@ -587,6 +587,16 @@ class Secrets(UpdateTrackingModel["Secrets"], BaseSettings):
         description="The secret key to use for the unsubscribe user by token",
     )
 
+    vapid_private_key: str = Field(
+        default="", description="VAPID private key for Web Push"
+    )
+    vapid_public_key: str = Field(
+        default="", description="VAPID public key for Web Push (base64url)"
+    )
+    vapid_claim_email: str = Field(
+        default="mailto:push@agpt.co", description="VAPID contact email"
+    )
+
     # OAuth server credentials for integrations
     # --8<-- [start:OAuthServerCredentialsExample]
     github_client_id: str = Field(default="", description="GitHub OAuth client ID")

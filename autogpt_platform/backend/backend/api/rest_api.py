@@ -32,6 +32,7 @@ import backend.api.features.mcp.routes as mcp_routes
 import backend.api.features.oauth
 import backend.api.features.otto.routes
 import backend.api.features.postmark.postmark
+import backend.api.features.push.routes as push_routes
 import backend.api.features.store.model
 import backend.api.features.store.routes
 import backend.api.features.v1
@@ -371,6 +372,11 @@ app.include_router(
     backend.api.features.oauth.router,
     tags=["oauth"],
     prefix="/api/oauth",
+)
+app.include_router(
+    push_routes.router,
+    tags=["push"],
+    prefix="/api/push",
 )
 
 app.mount("/external-api", external_api)

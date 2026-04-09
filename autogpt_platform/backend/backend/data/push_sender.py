@@ -1,0 +1,101 @@
+"""Fire-and-forget Web Push delivery for notification events."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+
+from prisma.models import PushSubscription
+from pywebpush import WebPushException, webpush
+
+from backend.api.model import NotificationPayload
+from backend.data.push_subscription import (
+    delete_push_subscription_by_endpoint,
+    get_user_push_subscriptions,
+    increment_fail_count,
+)
+from backend.util.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+_settings = Settings()
+
+# In-memory per-user debounce to collapse rapid-fire notifications
+_user_last_push: dict[str, float] = {}
+DEBOUNCE_SECONDS = 5.0
+
+# Fields to forward from the notification payload to the push message
+_FORWARDED_FIELDS = ("session_id", "step", "status", "graph_id", "execution_id")
+
+
+def _build_push_payload(payload: NotificationPayload) -> str:
+    """Build a compact JSON payload (<4KB) for the push message."""
+    data = payload.model_dump()
+    compact: dict[str, object] = {
+        "type": data.get("type", ""),
+        "event": data.get("event", ""),
+    }
+    for key in _FORWARDED_FIELDS:
+        if key in data:
+            compact[key] = data[key]
+    return json.dumps(compact)
+
+
+async def send_push_for_user(user_id: str, payload: NotificationPayload) -> None:
+    """Send push notifications to all of a user's subscriptions.
+
+    - Skips silently if VAPID keys are not configured.
+    - Debounces per-user (collapses pushes within DEBOUNCE_SECONDS).
+    - Cleans up stale subscriptions on 410/404 responses.
+    """
+    vapid_private = _settings.secrets.vapid_private_key
+    vapid_public = _settings.secrets.vapid_public_key
+    if not vapid_private or not vapid_public:
+        return
+
+    now = time.monotonic()
+    last = _user_last_push.get(user_id, 0.0)
+    if now - last < DEBOUNCE_SECONDS:
+        logger.debug("Debouncing push for user %s", user_id)
+        return
+    _user_last_push[user_id] = now
+
+    subscriptions = await get_user_push_subscriptions(user_id)
+    if not subscriptions:
+        return
+
+    push_data = _build_push_payload(payload)
+    vapid_claims = {"sub": _settings.secrets.vapid_claim_email}
+
+    async def _send_one(sub: PushSubscription) -> None:
+        try:
+            await asyncio.to_thread(
+                webpush,
+                subscription_info={
+                    "endpoint": sub.endpoint,
+                    "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
+                },
+                data=push_data,
+                vapid_private_key=vapid_private,
+                vapid_claims=vapid_claims,
+            )
+        except WebPushException as e:
+            status = getattr(e.response, "status_code", None) if e.response else None
+            if status in (410, 404):
+                logger.info(
+                    "Push subscription gone (%s), removing: %s",
+                    status,
+                    sub.endpoint[:60],
+                )
+                await delete_push_subscription_by_endpoint(sub.endpoint)
+            else:
+                logger.warning("Push failed for %s: %s", sub.endpoint[:60], e)
+                await increment_fail_count(sub.endpoint)
+        except Exception:
+            logger.exception("Unexpected error sending push to %s", sub.endpoint[:60])
+
+    await asyncio.gather(
+        *[_send_one(sub) for sub in subscriptions], return_exceptions=True
+    )

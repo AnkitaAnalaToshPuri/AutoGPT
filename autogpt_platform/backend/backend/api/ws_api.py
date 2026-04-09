@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from backend.api.conn_manager import ConnectionManager
 from backend.api.model import (
+    NotificationPayload,
     WSMessage,
     WSMethod,
     WSSubscribeGraphExecutionRequest,
@@ -19,6 +20,7 @@ from backend.api.model import (
 from backend.api.utils.cors import build_cors_params
 from backend.data.execution import AsyncRedisExecutionEventBus
 from backend.data.notification_bus import AsyncRedisNotificationEventBus
+from backend.data.push_sender import send_push_for_user
 from backend.data.user import DEFAULT_USER_ID
 from backend.monitoring.instrumentation import (
     instrument_fastapi,
@@ -78,12 +80,23 @@ async def event_broadcaster(manager: ConnectionManager):
                     user_id=notification.user_id,
                     payload=notification.payload,
                 )
+                asyncio.create_task(
+                    _safe_send_push(notification.user_id, notification.payload)
+                )
 
         await asyncio.gather(execution_worker(), notification_worker())
     finally:
         # Ensure PubSub connections are closed on any exit to prevent leaks
         await execution_bus.close()
         await notification_bus.close()
+
+
+async def _safe_send_push(user_id: str, payload: NotificationPayload) -> None:
+    """Send push notification, swallowing errors to not disrupt WS flow."""
+    try:
+        await send_push_for_user(user_id, payload)
+    except Exception:
+        logger.exception("Failed to send web push for user %s", user_id)
 
 
 async def authenticate_websocket(websocket: WebSocket) -> str:
