@@ -75,7 +75,7 @@ export async function createBot(config: Config, stateAdapter: StateAdapter) {
     const resolved = await api.resolve(platform, serverId);
 
     if (!resolved.linked) {
-      await handleUnlinkedServer(thread, message, platform, serverId, api);
+      await handleUnlinkedServer(thread, message, platform, serverId, api, bot);
       return;
     }
 
@@ -101,7 +101,7 @@ export async function createBot(config: Config, stateAdapter: StateAdapter) {
     const resolved = await api.resolve(platform, serverId);
 
     if (!resolved.linked) {
-      await handleUnlinkedServer(thread, message, platform, serverId, api);
+      await handleUnlinkedServer(thread, message, platform, serverId, api, bot);
       return;
     }
 
@@ -145,6 +145,7 @@ async function handleUnlinkedServer(
   platform: string,
   serverId: string,
   api: PlatformAPI,
+  bot: Chat<Record<string, Adapter>, BotThreadState>,
 ) {
   console.log(`[bot] Server ${platform}:${serverId} not linked, sending setup DM`);
 
@@ -156,8 +157,9 @@ async function handleUnlinkedServer(
       platformUsername: message.author.fullName ?? message.author.userName,
     });
 
-    // DM the link — never post it publicly
-    await message.author.sendDM(
+    // Open a DM thread with the user and post the link privately
+    const dmThread = await bot.openDM(message.author);
+    await dmThread.post(
       `👋 **Set up CoPilot for this server**\n\n` +
         `Click below to connect your AutoGPT account. ` +
         `Once done, everyone in the server can use CoPilot — ` +
