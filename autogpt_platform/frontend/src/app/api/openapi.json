@@ -5700,6 +5700,47 @@
         }
       }
     },
+    "/api/platform-linking/tokens/{token}/info": {
+      "get": {
+        "tags": ["platform-linking"],
+        "summary": "Get display info for a link token (no auth required)",
+        "description": "Returns non-sensitive display info (platform, server name) so the frontend\ncan show context before the user confirms. No auth required — the token has\n32 bytes of entropy and expires in 30 minutes.",
+        "operationId": "getPlatform-linkingGet display info for a link token (no auth required)",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkTokenInfoResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/platform-linking/tokens/{token}/status": {
       "get": {
         "tags": ["platform-linking"],
@@ -10868,6 +10909,19 @@
         "required": ["source_id", "sink_id", "source_name", "sink_name"],
         "title": "Link"
       },
+      "LinkTokenInfoResponse": {
+        "properties": {
+          "platform": { "type": "string", "title": "Platform" },
+          "server_name": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Server Name"
+          }
+        },
+        "type": "object",
+        "required": ["platform", "server_name"],
+        "title": "LinkTokenInfoResponse",
+        "description": "Non-sensitive display info for the frontend link page."
+      },
       "LinkTokenResponse": {
         "properties": {
           "token": { "type": "string", "title": "Token" },
@@ -12311,12 +12365,20 @@
             "minLength": 1,
             "title": "Platform Server Id",
             "description": "Server/guild/group ID to look up"
+          },
+          "platform_user_id": {
+            "anyOf": [
+              { "type": "string", "maxLength": 255 },
+              { "type": "null" }
+            ],
+            "title": "Platform User Id",
+            "description": "DM fallback: if no server link found, check owner status"
           }
         },
         "type": "object",
         "required": ["platform", "platform_server_id"],
         "title": "ResolveRequest",
-        "description": "Check whether a platform server is linked to an AutoGPT owner account."
+        "description": "Check whether a platform server is linked to an AutoGPT owner account.\n\nIn DM contexts there is no server — platform_user_id enables a fallback\nlookup: if no server link is found, check whether the user is already an\nowner of any linked server on this platform."
       },
       "ResolveResponse": {
         "properties": { "linked": { "type": "boolean", "title": "Linked" } },
