@@ -1101,7 +1101,13 @@ class ExecutionProcessor:
             )
             total_cost += cost
 
-        cost, usage_count = execution_usage_cost(execution_count)
+        # execution_count=0 is used by charge_node_usage for nested tool calls
+        # which must not be pushed into higher execution-count tiers.
+        # execution_usage_cost(0) would trigger a charge because 0 % threshold == 0,
+        # so skip it entirely when execution_count is 0.
+        cost, usage_count = (
+            execution_usage_cost(execution_count) if execution_count > 0 else (0, 0)
+        )
         if cost > 0:
             remaining_balance = db_client.spend_credits(
                 user_id=node_exec.user_id,
