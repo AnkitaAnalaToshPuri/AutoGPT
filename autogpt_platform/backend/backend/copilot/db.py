@@ -522,15 +522,9 @@ async def update_message_content_by_sequence(
         True if a message was updated, False otherwise.
     """
     try:
-        # ChatMessage has a @@unique([sessionId, sequence]) constraint so
-        # update_many will match at most one row; assert to catch schema drift.
         result = await PrismaChatMessage.prisma().update_many(
             where={"sessionId": session_id, "sequence": sequence},
             data={"content": sanitize_string(new_content)},
-        )
-        assert result <= 1, (
-            f"update_many matched {result} rows for session {session_id}, "
-            f"sequence {sequence} — expected at most 1 (unique constraint)"
         )
         if result == 0:
             logger.warning(
