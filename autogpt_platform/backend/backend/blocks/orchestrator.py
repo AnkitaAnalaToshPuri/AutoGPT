@@ -1407,9 +1407,17 @@ class OrchestratorBlock(Block):
                             "arguments": tc.arguments,
                         },
                     )
+        except InsufficientBalanceError:
+            # Billing failures must propagate out of the block so the
+            # executor's billing-leak handling fires (error recording on
+            # execution_stats, user notification, structured logging).
+            # Do NOT downgrade to a user-visible "error" output — that
+            # would swallow the failure and leak the exact balance amount.
+            raise
         except Exception as e:
-            # Catch all errors (validation, network, API) so that the block
-            # surfaces them as user-visible output instead of crashing.
+            # Catch all OTHER errors (validation, network, API) so that
+            # the block surfaces them as user-visible output instead of
+            # crashing.
             yield "error", str(e)
             return
 
@@ -1774,11 +1782,19 @@ class OrchestratorBlock(Block):
                             await pending_task
                         except (asyncio.CancelledError, StopAsyncIteration):
                             pass
+        except InsufficientBalanceError:
+            # Billing failures must propagate so the executor's
+            # billing-leak handling fires (error recording, user
+            # notification, structured logging). Mirrors the carve-out
+            # in _execute_tools_agent_mode — do not downgrade to a
+            # user-visible error output. The `finally` block below
+            # still runs and records partial token usage.
+            raise
         except Exception as e:
-            # Surface SDK errors as user-visible output instead of crashing,
-            # consistent with _execute_tools_agent_mode error handling.
-            # Don't return yet — fall through to merge_stats below so
-            # partial token usage is always recorded.
+            # Surface OTHER SDK errors as user-visible output instead
+            # of crashing, consistent with _execute_tools_agent_mode
+            # error handling. Don't return yet — fall through to
+            # merge_stats below so partial token usage is always recorded.
             sdk_error = e
         finally:
             # Always record usage stats, even on error.  The SDK may have
