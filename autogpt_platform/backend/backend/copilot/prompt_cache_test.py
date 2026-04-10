@@ -129,6 +129,82 @@ class TestBuildSystemPrompt:
         assert understanding is None
 
 
+class TestInjectUserContext:
+    """Tests for inject_user_context — sequence resolution logic."""
+
+    @pytest.mark.asyncio
+    async def test_uses_session_msg_sequence_when_set(self):
+        """When session_msg.sequence is populated (DB-loaded), it is used as the DB key."""
+        from backend.copilot.model import ChatMessage
+        from backend.copilot.service import inject_user_context
+
+        understanding = MagicMock()
+        understanding.__str__ = MagicMock(return_value="biz ctx")
+
+        msg = ChatMessage(role="user", content="hello", sequence=7)
+
+        with patch(
+            "backend.copilot.service.update_message_content_by_sequence",
+            new=AsyncMock(return_value=True),
+        ) as mock_update, patch(
+            "backend.copilot.service.format_understanding_for_prompt",
+            return_value="biz ctx",
+        ):
+            result = await inject_user_context(understanding, "hello", "sess-1", [msg])
+
+        assert result is not None
+        assert "<user_context>" in result
+        mock_update.assert_awaited_once()
+        _, called_sequence, _ = mock_update.call_args.args
+        assert called_sequence == 7
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_idx_when_sequence_is_none(self):
+        """When session_msg.sequence is None (cache-loaded), list index is used as fallback."""
+        from backend.copilot.model import ChatMessage
+        from backend.copilot.service import inject_user_context
+
+        understanding = MagicMock()
+
+        msg = ChatMessage(role="user", content="hello", sequence=None)
+
+        with patch(
+            "backend.copilot.service.update_message_content_by_sequence",
+            new=AsyncMock(return_value=True),
+        ) as mock_update, patch(
+            "backend.copilot.service.format_understanding_for_prompt",
+            return_value="biz ctx",
+        ):
+            result = await inject_user_context(understanding, "hello", "sess-1", [msg])
+
+        assert result is not None
+        mock_update.assert_awaited_once()
+        _, called_sequence, _ = mock_update.call_args.args
+        assert called_sequence == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_user_message(self):
+        """Returns None when session_messages contains no user role message."""
+        from backend.copilot.model import ChatMessage
+        from backend.copilot.service import inject_user_context
+
+        understanding = MagicMock()
+
+        msgs = [ChatMessage(role="assistant", content="hi")]
+
+        with patch(
+            "backend.copilot.service.update_message_content_by_sequence",
+            new=AsyncMock(return_value=True),
+        ) as mock_update, patch(
+            "backend.copilot.service.format_understanding_for_prompt",
+            return_value="biz ctx",
+        ):
+            result = await inject_user_context(understanding, "hello", "sess-1", msgs)
+
+        assert result is None
+        mock_update.assert_not_awaited()
+
+
 class TestCacheableSystemPromptContent:
     """Smoke-test the _CACHEABLE_SYSTEM_PROMPT constant for key structural requirements."""
 

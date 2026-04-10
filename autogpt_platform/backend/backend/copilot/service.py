@@ -152,7 +152,8 @@ async def inject_user_context(
     for idx, session_msg in enumerate(session_messages):
         if session_msg.role == "user":
             session_msg.content = prefixed
-            await update_message_content_by_sequence(session_id, idx, prefixed)
+            sequence = session_msg.sequence if session_msg.sequence is not None else idx
+            await update_message_content_by_sequence(session_id, sequence, prefixed)
             return prefixed
     return None
 
