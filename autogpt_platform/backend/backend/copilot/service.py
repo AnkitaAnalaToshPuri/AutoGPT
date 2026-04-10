@@ -21,7 +21,7 @@ from backend.data.understanding import format_understanding_for_prompt
 from backend.util.exceptions import NotAuthorizedError, NotFoundError
 from backend.util.settings import AppEnvironment, Settings
 
-from .config import ChatConfig
+from .config import ANTHROPIC_BASE_URL, ChatConfig
 from .model import (
     ChatSessionInfo,
     get_chat_session,
@@ -35,6 +35,7 @@ config = ChatConfig()
 settings = Settings()
 
 _client: LangfuseAsyncOpenAI | None = None
+_anthropic_client: LangfuseAsyncOpenAI | None = None
 _langfuse = None
 
 
@@ -43,6 +44,16 @@ def _get_openai_client() -> LangfuseAsyncOpenAI:
     if _client is None:
         _client = LangfuseAsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
     return _client
+
+
+def _get_anthropic_client() -> LangfuseAsyncOpenAI:
+    """Return an OpenAI-compatible client pointed at the Anthropic API."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = LangfuseAsyncOpenAI(
+            api_key=config.anthropic_api_key, base_url=ANTHROPIC_BASE_URL
+        )
+    return _anthropic_client
 
 
 def _get_langfuse():

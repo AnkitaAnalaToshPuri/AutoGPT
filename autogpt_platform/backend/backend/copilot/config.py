@@ -8,6 +8,8 @@ from pydantic_settings import BaseSettings
 
 from backend.util.clients import OPENROUTER_BASE_URL
 
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+
 # Per-request routing mode for a single chat turn.
 # - 'fast': route to the baseline OpenAI-compatible path with the cheaper model.
 # - 'extended_thinking': route to the Claude Agent SDK path with the default
@@ -22,11 +24,11 @@ class ChatConfig(BaseSettings):
 
     # OpenAI API Configuration
     model: str = Field(
-        default="anthropic/claude-opus-4.6",
+        default="claude-opus-4-20250514",
         description="Default model for extended thinking mode",
     )
     fast_model: str = Field(
-        default="anthropic/claude-sonnet-4",
+        default="claude-sonnet-4-20250514",
         description="Model for fast mode (baseline path). Should be faster/cheaper than the default model.",
     )
     title_model: str = Field(
@@ -38,6 +40,10 @@ class ChatConfig(BaseSettings):
         description="Model for dry-run block simulation (should be fast/cheap with good JSON output)",
     )
     api_key: str | None = Field(default=None, description="OpenAI API key")
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description="Anthropic API key for direct Anthropic API access (baseline path)",
+    )
     base_url: str | None = Field(
         default=OPENROUTER_BASE_URL,
         description="Base URL for API (e.g., for OpenRouter)",
@@ -277,6 +283,14 @@ class ChatConfig(BaseSettings):
             # Note: ANTHROPIC_API_KEY is intentionally NOT included here.
             # The SDK CLI picks it up from the env directly. Including it
             # would pair it with the OpenRouter base_url, causing auth failures.
+        return v
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def get_anthropic_api_key(cls, v):
+        """Get Anthropic API key from environment if not provided."""
+        if not v:
+            v = os.getenv("ANTHROPIC_API_KEY")
         return v
 
     @field_validator("base_url", mode="before")

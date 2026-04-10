@@ -14,6 +14,7 @@ _ENV_VARS_TO_CLEAR = (
     "CHAT_API_KEY",
     "OPEN_ROUTER_API_KEY",
     "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
     "CHAT_BASE_URL",
     "OPENROUTER_BASE_URL",
     "OPENAI_BASE_URL",
@@ -68,6 +69,38 @@ class TestOpenrouterActive:
             base_url="not-a-url",
         )
         assert cfg.openrouter_active is False
+
+
+class TestAnthropicApiKey:
+    """Tests for the anthropic_api_key field and validator."""
+
+    def test_reads_from_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        cfg = ChatConfig()
+        assert cfg.anthropic_api_key == "sk-ant-test"
+
+    def test_none_when_not_set(self):
+        cfg = ChatConfig()
+        assert cfg.anthropic_api_key is None
+
+    def test_explicit_value_overrides_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "from-env")
+        cfg = ChatConfig(anthropic_api_key="explicit")
+        assert cfg.anthropic_api_key == "explicit"
+
+
+class TestDefaultModelNames:
+    """Default model names should use direct Anthropic IDs (not OpenRouter format)."""
+
+    def test_default_model_is_direct_anthropic(self):
+        cfg = ChatConfig()
+        assert "/" not in cfg.model
+        assert cfg.model.startswith("claude-")
+
+    def test_fast_model_is_direct_anthropic(self):
+        cfg = ChatConfig()
+        assert "/" not in cfg.fast_model
+        assert cfg.fast_model.startswith("claude-")
 
 
 class TestE2BActive:

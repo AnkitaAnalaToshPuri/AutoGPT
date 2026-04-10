@@ -828,3 +828,94 @@ class TestBaselineCostExtraction:
 
         # response was never assigned so cost extraction must not raise
         assert state.cost_usd is None
+
+
+class TestGetBaselineClient:
+    """Tests for _get_baseline_client routing logic."""
+
+    def test_anthropic_model_uses_anthropic_client(self):
+        from backend.copilot.baseline.service import _get_baseline_client
+
+        mock_anthropic = MagicMock()
+        mock_openai = MagicMock()
+        with (
+            patch(
+                "backend.copilot.baseline.service._get_anthropic_client",
+                return_value=mock_anthropic,
+            ),
+            patch(
+                "backend.copilot.baseline.service._get_openai_client",
+                return_value=mock_openai,
+            ),
+            patch(
+                "backend.copilot.baseline.service.config",
+                anthropic_api_key="sk-ant-test",
+            ),
+        ):
+            client = _get_baseline_client("claude-sonnet-4-20250514")
+        assert client is mock_anthropic
+
+    def test_openrouter_model_uses_openai_client(self):
+        from backend.copilot.baseline.service import _get_baseline_client
+
+        mock_anthropic = MagicMock()
+        mock_openai = MagicMock()
+        with (
+            patch(
+                "backend.copilot.baseline.service._get_anthropic_client",
+                return_value=mock_anthropic,
+            ),
+            patch(
+                "backend.copilot.baseline.service._get_openai_client",
+                return_value=mock_openai,
+            ),
+            patch(
+                "backend.copilot.baseline.service.config",
+                anthropic_api_key="sk-ant-test",
+            ),
+        ):
+            client = _get_baseline_client("openai/gpt-4o-mini")
+        assert client is mock_openai
+
+    def test_anthropic_model_without_key_falls_back_to_openrouter(self):
+        from backend.copilot.baseline.service import _get_baseline_client
+
+        mock_anthropic = MagicMock()
+        mock_openai = MagicMock()
+        with (
+            patch(
+                "backend.copilot.baseline.service._get_anthropic_client",
+                return_value=mock_anthropic,
+            ),
+            patch(
+                "backend.copilot.baseline.service._get_openai_client",
+                return_value=mock_openai,
+            ),
+            patch(
+                "backend.copilot.baseline.service.config",
+                anthropic_api_key=None,
+            ),
+        ):
+            client = _get_baseline_client("claude-sonnet-4-20250514")
+        assert client is mock_openai
+
+
+class TestIsAnthropicModel:
+    """Tests for _is_anthropic_model helper."""
+
+    def test_claude_prefix(self):
+        from backend.copilot.baseline.service import _is_anthropic_model
+
+        assert _is_anthropic_model("claude-sonnet-4-20250514") is True
+        assert _is_anthropic_model("claude-opus-4-20250514") is True
+
+    def test_anthropic_slash_prefix(self):
+        from backend.copilot.baseline.service import _is_anthropic_model
+
+        assert _is_anthropic_model("anthropic/claude-sonnet-4") is True
+
+    def test_non_anthropic(self):
+        from backend.copilot.baseline.service import _is_anthropic_model
+
+        assert _is_anthropic_model("openai/gpt-4o-mini") is False
+        assert _is_anthropic_model("google/gemini-2.5-flash") is False

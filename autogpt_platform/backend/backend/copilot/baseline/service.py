@@ -53,6 +53,7 @@ from backend.copilot.response_model import (
 )
 from backend.copilot.service import (
     _build_system_prompt,
+    _get_anthropic_client,
     _get_openai_client,
     _update_title_async,
     config,
@@ -83,6 +84,8 @@ from backend.util.tool_call_loop import (
 )
 
 if TYPE_CHECKING:
+    from langfuse.openai import AsyncOpenAI as LangfuseAsyncOpenAI
+
     from backend.copilot.permissions import CopilotPermissions
 
 logger = logging.getLogger(__name__)
@@ -229,6 +232,23 @@ def _resolve_baseline_model(mode: CopilotMode | None) -> str:
     return config.model
 
 
+def _is_anthropic_model(model: str) -> bool:
+    """Return True if *model* should be routed to the Anthropic API directly."""
+    return model.startswith("claude-") or model.startswith("anthropic/")
+
+
+def _get_baseline_client(model: str) -> "LangfuseAsyncOpenAI":
+    """Return the right OpenAI-compatible client for *model*.
+
+    Anthropic models are sent directly to the Anthropic API when an
+    ``ANTHROPIC_API_KEY`` is configured; everything else goes through
+    OpenRouter.
+    """
+    if _is_anthropic_model(model) and config.anthropic_api_key:
+        return _get_anthropic_client()
+    return _get_openai_client()
+
+
 # Tag pairs to strip from baseline streaming output.  Different models use
 # different tag names for their internal reasoning (Claude uses <thinking>,
 # Gemini uses <internal_reasoning>, etc.).
@@ -359,7 +379,7 @@ async def _baseline_llm_caller(
     round_text = ""
     response = None  # initialized before try so finally block can access it
     try:
-        client = _get_openai_client()
+        client = _get_baseline_client(state.model)
         typed_messages = cast(list[ChatCompletionMessageParam], messages)
         if tools:
             typed_tools = cast(list[ChatCompletionToolParam], tools)
@@ -729,7 +749,7 @@ async def _compress_session_messages(
         result = await compress_context(
             messages=messages_dict,
             model=model,
-            client=_get_openai_client(),
+            client=_get_baseline_client(model),
         )
     except Exception as e:
         logger.warning("[Baseline] Context compression with LLM failed: %s", e)
