@@ -1,6 +1,6 @@
 """Pydantic models for tool responses."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -735,6 +735,15 @@ class TaskDecompositionResponse(ToolResponseBase):
             "Seconds the client should count down before auto-approving. "
             "Kept in sync with the server-side fallback timer, which runs a "
             "grace period longer to absorb network latency."
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description=(
+            "UTC timestamp when the tool returned. The client uses this with "
+            "auto_approve_seconds to compute the correct remaining countdown "
+            "when the user reopens the session — so the timer reflects real "
+            "elapsed time instead of restarting from zero."
         ),
     )
 

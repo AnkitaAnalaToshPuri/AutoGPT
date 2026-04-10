@@ -27,6 +27,10 @@ export interface TaskDecompositionOutput {
   step_count: number;
   requires_approval: boolean;
   auto_approve_seconds?: number;
+  // ISO 8601 UTC timestamp stamped by the backend when the tool returned.
+  // Used to compute the actual remaining countdown when the user reopens
+  // the session, so the timer doesn't restart from full each time.
+  created_at?: string;
 }
 
 export interface DecomposeErrorOutput {

@@ -1,6 +1,7 @@
 """Unit tests for DecomposeGoalTool."""
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -299,6 +300,25 @@ async def test_response_includes_auto_approve_seconds(tool: DecomposeGoalTool, s
     )
     assert isinstance(result, TaskDecompositionResponse)
     assert result.auto_approve_seconds == AUTO_APPROVE_CLIENT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_response_includes_created_at(tool: DecomposeGoalTool, session):
+    """created_at must be stamped at execution time so the client can
+    compute remaining countdown when the user reopens the session."""
+    before = datetime.now(UTC)
+    result = await tool._execute(
+        user_id=_USER_ID,
+        session=session,
+        goal="Build agent",
+        steps=_VALID_STEPS,
+    )
+    after = datetime.now(UTC)
+
+    assert isinstance(result, TaskDecompositionResponse)
+    assert isinstance(result.created_at, datetime)
+    # Stamped during the call.
+    assert before <= result.created_at <= after
 
 
 # ---------------------------------------------------------------------------
