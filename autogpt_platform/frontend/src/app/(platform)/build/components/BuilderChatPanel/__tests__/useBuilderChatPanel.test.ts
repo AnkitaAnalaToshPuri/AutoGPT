@@ -86,10 +86,11 @@ vi.mock("ai", () => ({
 }));
 
 let mockFlowID: string | null = null;
+const mockSetQueryStates = vi.fn();
 
 vi.mock("nuqs", () => ({
   parseAsString: { withDefault: (d: string) => d },
-  useQueryStates: () => [{ flowID: mockFlowID }, vi.fn()],
+  useQueryStates: () => [{ flowID: mockFlowID }, mockSetQueryStates],
 }));
 
 // Import after mocks
@@ -111,6 +112,7 @@ beforeEach(() => {
   mockSendMessage.mockClear();
   mockSetMessages.mockClear();
   mockToast.mockClear();
+  mockSetQueryStates.mockClear();
   clearGraphSessionCacheForTesting();
 });
 
@@ -1569,6 +1571,99 @@ describe("useBuilderChatPanel – tool call detection", () => {
     act(() => rerender());
 
     expect(onGraphEdited).toHaveBeenCalledOnce();
+  });
+
+  it("calls setQueryStates with execution_id when run_agent tool call completes with valid id", async () => {
+    mockChatStatus = "ready";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart("run_agent", "tc-run", "output-available", {
+            execution_id: "exec-abc123",
+          }),
+        ],
+      },
+    ];
+    renderHook(() => useBuilderChatPanel());
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(mockSetQueryStates).toHaveBeenCalledWith({
+      flowExecutionID: "exec-abc123",
+    });
+  });
+
+  it("does NOT call setQueryStates when run_agent output has no execution_id", async () => {
+    mockChatStatus = "ready";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart("run_agent", "tc-run-null", "output-available", {
+            other_field: "something",
+          }),
+        ],
+      },
+    ];
+    renderHook(() => useBuilderChatPanel());
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(mockSetQueryStates).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call setQueryStates when run_agent execution_id contains path-traversal characters", async () => {
+    mockChatStatus = "ready";
+    mockChatMessages = [
+      {
+        id: "m1",
+        role: "assistant",
+        parts: [
+          makeDynamicToolPart("run_agent", "tc-run-bad", "output-available", {
+            execution_id: "../../admin",
+          }),
+        ],
+      },
+    ];
+    renderHook(() => useBuilderChatPanel());
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(mockSetQueryStates).not.toHaveBeenCalled();
+  });
+
+  it("does NOT process run_agent tool call twice (deduplication)", async () => {
+    mockChatStatus = "ready";
+    const part = makeDynamicToolPart(
+      "run_agent",
+      "tc-run-dedup",
+      "output-available",
+      {
+        execution_id: "exec-dedup",
+      },
+    );
+    mockChatMessages = [{ id: "m1", role: "assistant", parts: [part] }];
+
+    const { rerender } = renderHook(() => useBuilderChatPanel());
+
+    await act(async () => {
+      await new Promise<void>((r) => setTimeout(r, 0));
+    });
+
+    expect(mockSetQueryStates).toHaveBeenCalledOnce();
+
+    act(() => rerender());
+
+    expect(mockSetQueryStates).toHaveBeenCalledOnce();
   });
 });
 
