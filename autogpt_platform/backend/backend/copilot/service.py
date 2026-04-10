@@ -177,13 +177,18 @@ async def inject_user_context(
 
     user_ctx = format_understanding_for_prompt(understanding)
     prefixed = f"<{USER_CONTEXT_TAG}>\n{user_ctx}\n</{USER_CONTEXT_TAG}>\n\n{message}"
-    for idx, session_msg in enumerate(session_messages):
+    for session_msg in session_messages:
         if session_msg.role == "user":
             session_msg.content = prefixed
-            sequence = session_msg.sequence if session_msg.sequence is not None else idx
-            await chat_db().update_message_content_by_sequence(
-                session_id, sequence, prefixed
-            )
+            if session_msg.sequence is not None:
+                await chat_db().update_message_content_by_sequence(
+                    session_id, session_msg.sequence, prefixed
+                )
+            else:
+                logger.warning(
+                    f"[inject_user_context] Cannot persist user context for session "
+                    f"{session_id}: first user message has no sequence number"
+                )
             return prefixed
     return None
 
