@@ -1238,16 +1238,30 @@ async def get_stripe_customer_id(user_id: str) -> str:
     if user.stripe_customer_id:
         return user.stripe_customer_id
 
+    # Race protection: two concurrent calls (e.g. user double-clicks "Upgrade",
+    # or any retried request) would each pass the check above and create their
+    # own Stripe Customer, leaving an orphaned billable customer in Stripe.
+    # Pass an idempotency_key so Stripe collapses concurrent + retried calls
+    # into the same Customer object server-side.
     customer = await run_in_threadpool(
         stripe.Customer.create,
         name=user.name or "",
         email=user.email,
         metadata={"user_id": user_id},
+        idempotency_key=f"customer-create-{user_id}",
     )
-    await User.prisma().update(
-        where={"id": user_id}, data={"stripeCustomerId": customer.id}
+    # Defensive double-check: if a concurrent caller already wrote a different
+    # customer ID, prefer the persisted one and discard the one we just made.
+    # (Stripe idempotency normally prevents this, but the key has a 24h TTL —
+    # outside that window two creates can still race.) Use a conditional
+    # update so we only persist when the column is still empty.
+    await User.prisma().update_many(
+        where={"id": user_id, "stripeCustomerId": None},
+        data={"stripeCustomerId": customer.id},
     )
-    return customer.id
+    get_user_by_id.cache_delete(user_id)
+    refreshed = await get_user_by_id(user_id)
+    return refreshed.stripe_customer_id or customer.id
 
 
 async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
@@ -1378,13 +1392,25 @@ async def _cleanup_stale_subscriptions(customer_id: str, new_sub_id: str) -> Non
     Called from the webhook handler after a new subscription becomes active. Failures
     are logged but not raised so a transient Stripe error doesn't crash the webhook —
     a periodic reconciliation job is the intended backstop for persistent drift.
+
+    NOTE: until that reconcile job lands, a failure here means the user is silently
+    billed for two simultaneous subscriptions. The error log below is intentionally
+    `logger.exception` so it surfaces in Sentry with the customer/sub IDs needed to
+    manually reconcile, and the metric `stripe_stale_subscription_cleanup_failed`
+    is bumped so on-call can alert on persistent drift.
+    TODO(#stripe-reconcile-job): replace this best-effort cleanup with a periodic
+    reconciliation job that queries Stripe for customers with >1 active sub.
     """
     try:
         await _cancel_customer_subscriptions(customer_id, exclude_sub_id=new_sub_id)
     except stripe.StripeError:
-        logger.warning(
-            "_cleanup_stale_subscriptions: Stripe error while cleaning up stale"
-            " subs for customer %s (new sub %s)",
+        # Use exception() (not warning) so this surfaces as an error in Sentry —
+        # any failure here means a paid-to-paid upgrade may have left the user
+        # with two simultaneous active subscriptions.
+        logger.exception(
+            "stripe_stale_subscription_cleanup_failed: customer=%s new_sub=%s —"
+            " user may be billed for two simultaneous subscriptions; manual"
+            " reconciliation required",
             customer_id,
             new_sub_id,
         )

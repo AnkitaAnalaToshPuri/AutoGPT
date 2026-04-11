@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, Sequence, get_args
+from typing import Annotated, Any, Literal, Sequence, cast, get_args
 from urllib.parse import urlparse
 
 import pydantic
@@ -856,6 +856,15 @@ async def update_subscription_tier(
         await set_subscription_tier(user_id, tier)
         return SubscriptionCheckoutResponse(url="")
 
+    # No-op short-circuit: if the user is already on the requested paid tier,
+    # do NOT create a new Checkout Session. Without this guard, a duplicate
+    # request (double-click, retried POST, stale page) creates a second
+    # subscription for the same price; the user would be charged for both
+    # until `_cleanup_stale_subscriptions` runs from the resulting webhook —
+    # which only fires after the second charge has cleared.
+    if (user.subscription_tier or SubscriptionTier.FREE) == tier:
+        return SubscriptionCheckoutResponse(url="")
+
     # Paid upgrade → create Stripe Checkout Session.
     if not request.success_url or not request.cancel_url:
         raise HTTPException(
@@ -924,24 +933,51 @@ async def stripe_webhook(request: Request):
         # Invalid signature
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    if (
-        event["type"] == "checkout.session.completed"
-        or event["type"] == "checkout.session.async_payment_succeeded"
-    ):
-        await UserCredit().fulfill_checkout(session_id=event["data"]["object"]["id"])
+    # Defensive payload extraction. A malformed payload (missing/non-dict
+    # `data.object`, missing `id`) would otherwise raise KeyError/TypeError
+    # AFTER signature verification — which Stripe interprets as a delivery
+    # failure and retries forever, while spamming Sentry with no useful info.
+    # Acknowledge with 200 and a warning so Stripe stops retrying.
+    event_type = event.get("type", "")
+    event_data = event.get("data") or {}
+    data_object = event_data.get("object") if isinstance(event_data, dict) else None
+    if not isinstance(data_object, dict):
+        logger.warning(
+            "stripe_webhook: %s missing or non-dict data.object; ignoring",
+            event_type,
+        )
+        return Response(status_code=200)
 
-    if event["type"] in (
+    if event_type in (
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+    ):
+        session_id = data_object.get("id")
+        if not session_id:
+            logger.warning(
+                "stripe_webhook: %s missing data.object.id; ignoring", event_type
+            )
+            return Response(status_code=200)
+        await UserCredit().fulfill_checkout(session_id=session_id)
+
+    if event_type in (
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
     ):
-        await sync_subscription_from_stripe(event["data"]["object"])
+        await sync_subscription_from_stripe(data_object)
 
-    if event["type"] == "charge.dispute.created":
-        await UserCredit().handle_dispute(event["data"]["object"])
+    # `handle_dispute` and `deduct_credits` expect Stripe SDK typed objects
+    # (Dispute/Refund). The Stripe webhook payload's `data.object` is a
+    # StripeObject (a dict subclass) carrying that runtime shape, so we cast
+    # to satisfy the type checker without changing runtime behaviour.
+    if event_type == "charge.dispute.created":
+        await UserCredit().handle_dispute(cast(stripe.Dispute, data_object))
 
-    if event["type"] == "refund.created" or event["type"] == "charge.dispute.closed":
-        await UserCredit().deduct_credits(event["data"]["object"])
+    if event_type == "refund.created" or event_type == "charge.dispute.closed":
+        await UserCredit().deduct_credits(
+            cast("stripe.Refund | stripe.Dispute", data_object)
+        )
 
     return Response(status_code=200)
 
