@@ -71,11 +71,12 @@ def test_write_builtin_blocked():
     assert _is_denied(result)
 
 
-def test_edit_within_workspace_allowed():
+def test_edit_builtin_blocked():
+    """SDK built-in Edit is blocked — all edits go through MCP Edit tool."""
     result = _validate_tool_access(
         "Edit", {"file_path": f"{SDK_CWD}/src/main.py"}, sdk_cwd=SDK_CWD
     )
-    assert result == {}
+    assert _is_denied(result)
 
 
 def test_glob_within_workspace_allowed():
