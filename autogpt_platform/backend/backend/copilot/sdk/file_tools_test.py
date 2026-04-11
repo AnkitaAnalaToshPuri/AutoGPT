@@ -367,6 +367,32 @@ class TestReadBinaryFile:
         assert not result["isError"]
 
 
+class TestReadTruncationDetection:
+    @pytest.mark.asyncio
+    async def test_truncation_offset_without_file_path(self, sdk_cwd):
+        """offset present but file_path missing — truncated call."""
+        result = await _handle_read_non_e2b({"offset": 5})
+        assert result["isError"]
+        text = result["content"][0]["text"]
+        assert "truncated" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_truncation_limit_without_file_path(self, sdk_cwd):
+        """limit present but file_path missing — truncated call."""
+        result = await _handle_read_non_e2b({"limit": 100})
+        assert result["isError"]
+        text = result["content"][0]["text"]
+        assert "truncated" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_truncation_plain_empty(self, sdk_cwd):
+        """No offset/limit, no file_path — generic error, not truncation."""
+        result = await _handle_read_non_e2b({})
+        assert result["isError"]
+        text = result["content"][0]["text"]
+        assert "required" in text.lower()
+
+
 class TestReadEmptyFilePath:
     @pytest.mark.asyncio
     async def test_empty_file_path(self, sdk_cwd):

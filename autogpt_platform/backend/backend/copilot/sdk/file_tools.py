@@ -15,6 +15,7 @@ The JSON schemas place ``file_path`` FIRST so that truncation is more likely
 to preserve the path (the API serialises properties in schema order).
 """
 
+import asyncio
 import itertools
 import json
 import logging
@@ -24,6 +25,12 @@ from typing import Any, Callable
 from backend.copilot.context import get_sdk_cwd, is_allowed_local_path
 
 logger = logging.getLogger(__name__)
+
+# Per-path lock for edit operations to prevent parallel lost updates.
+# When MCP tools are dispatched in parallel (readOnlyHint=True annotation),
+# two Edit calls on the same file could race through read-modify-write
+# and silently drop one change.  Keyed by resolved absolute path.
+_edit_locks: dict[str, asyncio.Lock] = {}
 
 # Inline content above this threshold triggers a warning — it survived this
 # time but is dangerously close to the API output-token truncation limit.
@@ -238,6 +245,14 @@ async def _handle_read_non_e2b(args: dict[str, Any]) -> dict[str, Any]:
         )
 
     if not file_path:
+        # Truncation detection: if offset/limit present but file_path missing,
+        # the call was likely truncated by the API.
+        if "offset" in args or "limit" in args:
+            return _mcp(
+                "Your read_file call was truncated (file_path missing but "
+                "offset/limit were present). Resend with the full file_path.",
+                error=True,
+            )
         return _mcp("file_path is required", error=True)
 
     sdk_cwd = get_sdk_cwd()
@@ -358,37 +373,42 @@ async def _handle_edit_non_e2b(args: dict[str, Any]) -> dict[str, Any]:
         return err
     assert resolved is not None
 
-    try:
-        with open(resolved, encoding="utf-8") as f:
-            content = f.read()
-    except FileNotFoundError:
-        return _mcp(f"File not found: {file_path}", error=True)
-    except PermissionError:
-        return _mcp(f"Permission denied: {file_path}", error=True)
-    except Exception as exc:
-        return _mcp(f"Failed to read {file_path}: {exc}", error=True)
+    # Per-path lock prevents parallel edits from racing through
+    # the read-modify-write cycle and silently dropping changes.
+    if resolved not in _edit_locks:
+        _edit_locks[resolved] = asyncio.Lock()
+    async with _edit_locks[resolved]:
+        try:
+            with open(resolved, encoding="utf-8") as f:
+                content = f.read()
+        except FileNotFoundError:
+            return _mcp(f"File not found: {file_path}", error=True)
+        except PermissionError:
+            return _mcp(f"Permission denied: {file_path}", error=True)
+        except Exception as exc:
+            return _mcp(f"Failed to read {file_path}: {exc}", error=True)
 
-    count = content.count(old_string)
-    if count == 0:
-        return _mcp(f"old_string not found in {file_path}", error=True)
-    if count > 1 and not replace_all:
-        return _mcp(
-            f"old_string appears {count} times in {file_path}. "
-            "Use replace_all=true or provide a more unique string.",
-            error=True,
+        count = content.count(old_string)
+        if count == 0:
+            return _mcp(f"old_string not found in {file_path}", error=True)
+        if count > 1 and not replace_all:
+            return _mcp(
+                f"old_string appears {count} times in {file_path}. "
+                "Use replace_all=true or provide a more unique string.",
+                error=True,
+            )
+
+        updated = (
+            content.replace(old_string, new_string)
+            if replace_all
+            else content.replace(old_string, new_string, 1)
         )
 
-    updated = (
-        content.replace(old_string, new_string)
-        if replace_all
-        else content.replace(old_string, new_string, 1)
-    )
-
-    try:
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(updated)
-    except Exception as exc:
-        return _mcp(f"Failed to write {file_path}: {exc}", error=True)
+        try:
+            with open(resolved, "w", encoding="utf-8") as f:
+                f.write(updated)
+        except Exception as exc:
+            return _mcp(f"Failed to write {file_path}: {exc}", error=True)
 
     return _mcp(f"Edited {resolved} ({count} replacement{'s' if count > 1 else ''})")
 
