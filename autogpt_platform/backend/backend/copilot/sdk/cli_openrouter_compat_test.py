@@ -484,7 +484,23 @@ async def test_cli_does_not_send_openrouter_incompatible_features():
     this passes naturally.  On a broken pin (0.1.55+, bundled CLI 2.1.91+)
     it fails — that failure IS the bisect signal we use to verify which
     SDK versions need the workaround.
+
+    Skipped when ``claude_agent_use_compat_proxy=True`` because in that
+    configuration the operator has explicitly opted into the workaround
+    and the bare-CLI behaviour is moot — what matters is that the
+    *upstream* (post-proxy) sees clean requests, which is covered by
+    ``test_cli_via_compat_proxy_emits_clean_requests_to_upstream``.
     """
+    from backend.copilot.config import ChatConfig
+
+    if ChatConfig().claude_agent_use_compat_proxy:
+        pytest.skip(
+            "Compat proxy is enabled in the active config — the bare-CLI "
+            "reproduction is not a meaningful signal here. The proxy-routed "
+            "variant `test_cli_via_compat_proxy_emits_clean_requests_to_upstream` "
+            "is the regression guard for this configuration."
+        )
+
     returncode, _stdout, stderr, captured = await _run_reproduction(
         route_through_proxy=False
     )
