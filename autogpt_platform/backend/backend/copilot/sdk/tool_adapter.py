@@ -39,6 +39,12 @@ from backend.copilot.tools.base import BaseTool
 from backend.util.truncate import truncate
 
 from .e2b_file_tools import E2B_FILE_TOOL_NAMES, E2B_FILE_TOOLS, bridge_and_annotate
+from .file_tools import (
+    WRITE_TOOL_DESCRIPTION,
+    WRITE_TOOL_NAME,
+    WRITE_TOOL_SCHEMA,
+    get_write_tool_handler,
+)
 
 if TYPE_CHECKING:
     from e2b import AsyncSandbox
@@ -619,6 +625,22 @@ def create_copilot_mcp_server(*, use_e2b: bool = False):
             )(_make_truncating_wrapper(handler, name))
             sdk_tools.append(decorated)
 
+    # Unified Write tool — replaces the CLI's built-in Write which has no
+    # defence against output-token truncation.  Registered in both E2B and
+    # non-E2B modes so we always control validation and error messaging.
+    write_handler = get_write_tool_handler(use_e2b=use_e2b)
+    write_tool = tool(
+        WRITE_TOOL_NAME,
+        WRITE_TOOL_DESCRIPTION,
+        WRITE_TOOL_SCHEMA,
+        annotations=_PARALLEL_ANNOTATION,
+    )(
+        _make_truncating_wrapper(
+            write_handler, WRITE_TOOL_NAME, input_schema=WRITE_TOOL_SCHEMA
+        )
+    )
+    sdk_tools.append(write_tool)
+
     # Read tool for SDK-truncated tool results (always needed, read-only).
     read_tool = tool(
         _READ_TOOL_NAME,
@@ -655,10 +677,17 @@ _SDK_BUILTIN_TOOLS = [*_SDK_BUILTIN_FILE_TOOLS, *_SDK_BUILTIN_ALWAYS]
 # WebFetch: SSRF risk — can reach internal network (localhost, 10.x, etc.).
 #   Agent uses the SSRF-protected mcp__copilot__web_fetch tool instead.
 # AskUserQuestion: interactive CLI tool — no terminal in copilot context.
+# Write: the CLI's built-in Write tool has no defence against output-token
+#   truncation.  When the LLM generates a very large `content` argument the
+#   API truncates the response mid-JSON and Ajv rejects it with the opaque
+#   "'file_path' is a required property" error, losing the user's work.
+#   All writes go through our MCP Write tool (file_tools.py) where we
+#   control validation and return actionable guidance.
 SDK_DISALLOWED_TOOLS = [
     "Bash",
     "WebFetch",
     "AskUserQuestion",
+    "Write",
 ]
 
 # Tools that are blocked entirely in security hooks (defence-in-depth).
@@ -697,6 +726,7 @@ DANGEROUS_PATTERNS = [
 # Static tool name list for the non-E2B case (backward compatibility).
 COPILOT_TOOL_NAMES = [
     *[f"{MCP_TOOL_PREFIX}{name}" for name in TOOL_REGISTRY.keys()],
+    f"{MCP_TOOL_PREFIX}{WRITE_TOOL_NAME}",
     f"{MCP_TOOL_PREFIX}{_READ_TOOL_NAME}",
     *_SDK_BUILTIN_TOOLS,
 ]
@@ -713,6 +743,7 @@ def get_copilot_tool_names(*, use_e2b: bool = False) -> list[str]:
 
     return [
         *[f"{MCP_TOOL_PREFIX}{name}" for name in TOOL_REGISTRY.keys()],
+        f"{MCP_TOOL_PREFIX}{WRITE_TOOL_NAME}",
         f"{MCP_TOOL_PREFIX}{_READ_TOOL_NAME}",
         *[f"{MCP_TOOL_PREFIX}{name}" for name in E2B_FILE_TOOL_NAMES],
         *_SDK_BUILTIN_ALWAYS,
