@@ -172,6 +172,6 @@ class TestClaudeAgentUseCompatProxyEnvFallback:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cfg = ChatConfig()
-        # Default is False on this branch; the dev-preview branch
-        # flips it to True but that's a separate PR.
-        assert cfg.claude_agent_use_compat_proxy is False
+        # Dev-preview branch defaults compat_proxy to True (the
+        # bundled CLI in claude-agent-sdk 0.1.58 needs the proxy).
+        assert cfg.claude_agent_use_compat_proxy is True
