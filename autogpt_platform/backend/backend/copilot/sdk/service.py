@@ -2287,11 +2287,17 @@ async def stream_chat_completion_sdk(
         # the query so that _build_query_message sees the full prefixed content.
         # The system prompt is now static (same for all users) so the LLM can
         # cache it across sessions.
-        if not has_history and understanding:
+        #
+        # inject_user_context also strips any user-supplied <user_context>
+        # blocks from `current_message` as a defence-in-depth measure — so
+        # even new users (understanding=None) are called through this path
+        # to sanitise the message. It mutates session.messages + DB in place
+        # so later --resume replays see the cleaned content.
+        if not has_history:
             prefixed_message = await inject_user_context(
                 understanding, current_message, session_id, session.messages
             )
-            if prefixed_message:
+            if prefixed_message is not None:
                 current_message = prefixed_message
 
         query_message, was_compacted = await _build_query_message(

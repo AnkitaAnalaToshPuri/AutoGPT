@@ -151,6 +151,23 @@ def strip_user_context_prefix(content: str) -> str:
     return _USER_CONTEXT_PREFIX_RE.sub("", content)
 
 
+def sanitize_user_supplied_context(message: str) -> str:
+    """Strip *any* `<user_context>...</user_context>` block from user-supplied
+    input — anywhere in the string, not just at the start.
+
+    This is the defence against context-spoofing: a user can type a literal
+    ``<user_context>`` tag in their message in an attempt to suppress or
+    impersonate the trusted personalisation prefix. The inject path must call
+    this **unconditionally** — including when ``understanding`` is ``None``
+    and no server-side prefix would otherwise be added — otherwise new users
+    (who have no understanding yet) can smuggle a tag through to the LLM.
+
+    The return is a cleaned message ready to be wrapped (or forwarded raw,
+    when there's no understanding to inject).
+    """
+    return _USER_CONTEXT_ANYWHERE_RE.sub("", message)
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers (used by SDK service and baseline)
 # ---------------------------------------------------------------------------
@@ -225,45 +242,49 @@ async def inject_user_context(
     personalisation.
 
     Untrusted input — both the user-supplied ``message`` and the user-owned
-    fields inside ``understanding`` — are stripped/escaped before being placed
+    fields inside ``understanding`` — is stripped/escaped before being placed
     inside the trusted ``<user_context>`` block. This prevents a user from
     spoofing their own (or another user's) personalisation context by
-    supplying a literal `<user_context>...</user_context>` tag in the message
-    body or in any of their understanding fields.
+    supplying a literal ``<user_context>...</user_context>`` tag in the
+    message body or in any of their understanding fields.
 
-    Idempotent: if there is no understanding to inject, the original message
-    is returned unchanged and no DB write is issued.
+    When ``understanding`` is ``None``, no trusted prefix is wrapped but the
+    first user message is still sanitised in place so that attacker tags
+    typed by new users do not reach the LLM.
 
     Returns:
-        The prefixed message string, or None if no user message was found.
+        The sanitised (and optionally prefixed) message string, or ``None``
+        if ``session_messages`` contains no user-role message.
     """
-    # Defence-in-depth: scrub any user-supplied <user_context> blocks from the
-    # incoming message before we re-wrap it. Without this, a user can either
-    # (a) suppress the trusted injection by typing the tag themselves, since
-    # the inject would otherwise see "already prefixed" and skip, or
-    # (b) spoof a different personalization to bias the LLM. Strip the tag
-    # everywhere it appears so the trusted prefix is always the only one.
-    sanitized_message = _USER_CONTEXT_ANYWHERE_RE.sub("", message)
+    sanitized_message = sanitize_user_supplied_context(message)
 
     if understanding is None:
-        return None
+        # No trusted context to inject — but we still need to persist the
+        # sanitised message so a later resume / page-reload replay doesn't
+        # feed the attacker tags back into the LLM.
+        final_message = sanitized_message
+    else:
+        raw_ctx = format_understanding_for_prompt(understanding)
+        user_ctx = _sanitize_user_context_field(raw_ctx)
+        final_message = format_user_context_prefix(user_ctx) + sanitized_message
 
-    raw_ctx = format_understanding_for_prompt(understanding)
-    user_ctx = _sanitize_user_context_field(raw_ctx)
-    prefixed = format_user_context_prefix(user_ctx) + sanitized_message
     for session_msg in session_messages:
         if session_msg.role == "user":
-            session_msg.content = prefixed
-            if session_msg.sequence is not None:
-                await chat_db().update_message_content_by_sequence(
-                    session_id, session_msg.sequence, prefixed
-                )
-            else:
-                logger.warning(
-                    f"[inject_user_context] Cannot persist user context for session "
-                    f"{session_id}: first user message has no sequence number"
-                )
-            return prefixed
+            # Only touch the DB / in-memory state when the content actually
+            # needs to change — avoids an unnecessary write on the common
+            # "no attacker tag, no understanding" path.
+            if session_msg.content != final_message:
+                session_msg.content = final_message
+                if session_msg.sequence is not None:
+                    await chat_db().update_message_content_by_sequence(
+                        session_id, session_msg.sequence, final_message
+                    )
+                else:
+                    logger.warning(
+                        f"[inject_user_context] Cannot persist user context for session "
+                        f"{session_id}: first user message has no sequence number"
+                    )
+            return final_message
     return None
 
 
