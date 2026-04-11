@@ -741,12 +741,13 @@ def _validate_checkout_redirect_url(url: str) -> bool:
     )
 
 
-@cached(ttl_seconds=300, maxsize=32)
+@cached(ttl_seconds=300, maxsize=32, cache_none=False)
 async def _get_stripe_price_amount(price_id: str) -> int | None:
     """Return the unit_amount (cents) for a Stripe Price ID, cached for 5 minutes.
 
-    Returns ``None`` on transient Stripe errors so the ``@cached`` decorator
-    (which skips caching ``None``) does not store the error state.  Callers
+    Returns ``None`` on transient Stripe errors. ``cache_none=False`` opts out
+    of caching the ``None`` sentinel so the next request retries Stripe instead
+    of being served a stale "no price" for the rest of the TTL window. Callers
     should treat ``None`` as an unknown price and fall back to 0.
 
     Stripe prices rarely change; caching avoids a ~200-600 ms Stripe round-trip on
