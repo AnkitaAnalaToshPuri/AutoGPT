@@ -105,14 +105,20 @@ router = APIRouter(
 def _strip_injected_context(message: dict) -> dict:
     """Hide the server-side `<user_context>` prefix from the API response.
 
+    Returns a **shallow copy** of *message* with the prefix removed from
+    ``content`` (if applicable).  The original dict is never mutated, so
+    callers can safely pass live session dicts without risking side-effects.
+
     The strip is delegated to ``strip_user_context_prefix`` in
     ``backend.copilot.service`` so the on-the-wire format stays in lockstep
-    with ``inject_user_context`` (the writer). Only ``user``-role messages
+    with ``inject_user_context`` (the writer).  Only ``user``-role messages
     with string content are touched; assistant / multimodal blocks pass
     through unchanged.
     """
     if message.get("role") == "user" and isinstance(message.get("content"), str):
-        message["content"] = strip_user_context_prefix(message["content"])
+        result = message.copy()
+        result["content"] = strip_user_context_prefix(message["content"])
+        return result
     return message
 
 
