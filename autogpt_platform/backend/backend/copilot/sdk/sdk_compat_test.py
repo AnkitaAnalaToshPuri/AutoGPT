@@ -202,22 +202,11 @@ def test_sdk_exports_hook_event_type(hook_event: str):
 # OpenRouter compatibility — bundled CLI version pin
 # ---------------------------------------------------------------------------
 #
-# We're stuck on ``claude-agent-sdk==0.1.45`` (bundled CLI ``2.1.63``)
-# because every version above introduces a 400 against OpenRouter:
-#
-# 1. CLI ``2.1.69`` (= SDK ``0.1.46``) shipped a `tool_reference` content
-#    block in `tool_result.content` that OpenRouter's stricter Zod
-#    validation rejects.  See PR
-#    https://github.com/Significant-Gravitas/AutoGPT/pull/12294 for the
-#    forensic write-up that originally pinned us.  CLI ``2.1.70`` added
-#    proxy detection that *should* disable the offending block, but two
-#    later attempts (Dependabot bumps to 0.1.55 / 0.1.56) still failed.
-#
-# 2. A second regression — the ``context-management-2025-06-27`` beta
-#    header — appeared in some CLI version after ``2.1.91``.  Tracked
-#    upstream at
-#    https://github.com/anthropics/claude-agent-sdk-python/issues/789
-#    (still open at the time of writing, no upstream PR yet).
+# Newer ``claude-agent-sdk`` versions bundle CLI binaries that send
+# features incompatible with OpenRouter (``tool_reference`` content
+# blocks, ``context-management-2025-06-27`` beta).  We neutralise these
+# at runtime by injecting ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1``
+# into the CLI subprocess env (see ``service.py``).
 #
 # This test is the cheapest possible regression guard: it pins the
 # bundled CLI to a known-good version.  If anyone bumps
@@ -225,89 +214,39 @@ def test_sdk_exports_hook_event_type(hook_event: str):
 # ``_cli_version.py`` will change and this test will fail with a clear
 # message that points the next person at the OpenRouter compat issue
 # instead of letting them silently re-break production.
-#
-# Workaround for actually upgrading: set the
-# ``claude_agent_cli_path`` config option (or the matching env var) to
-# point at a separately-installed Claude Code CLI binary at a known-good
-# version, so the SDK Python API surface and the CLI binary version can
-# be picked independently.
 
-# CLI versions verified to work against OpenRouter directly (no compat
-# proxy required) — bisected via the reproduction test in
-# `cli_openrouter_compat_test.py`.  Bundled CLI versions outside this
-# set are still allowed but ONLY when the compat proxy is enabled (see
-# the second known-good set below + the test below).
-_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT: frozenset[str] = frozenset(
+# CLI versions verified to work against OpenRouter when the
+# ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`` env var is set --
+# bisected via the reproduction test in ``cli_openrouter_compat_test.py``.
+_KNOWN_GOOD_BUNDLED_CLI_VERSIONS: frozenset[str] = frozenset(
     {
-        "2.1.63",  # claude-agent-sdk 0.1.45 — original pin from PR #12294.
-        "2.1.70",  # claude-agent-sdk 0.1.47 — first version with the
+        "2.1.63",  # claude-agent-sdk 0.1.45 -- original pin from PR #12294.
+        "2.1.70",  # claude-agent-sdk 0.1.47 -- first version with the
         #          tool_reference proxy detection fix; bisect-verified
         #          OpenRouter-safe in #12742.
+        "2.1.97",  # claude-agent-sdk 0.1.58 -- works with the
+        #          CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 env var.
     }
-)
-
-# CLI versions verified to work against OpenRouter ONLY when the
-# in-process `openrouter_compat_proxy` is enabled (which strips the
-# `tool_reference` content blocks and `context-management-2025-06-27`
-# beta from outgoing requests).  Without the proxy these CLI versions
-# trip OpenRouter's stricter validation and return 400.
-_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_VIA_PROXY: frozenset[str] = frozenset(
-    {
-        "2.1.97",  # claude-agent-sdk 0.1.58 — needs `claude_agent_use_compat_proxy=True`
-        #          due to the upstream regression in
-        #          anthropics/claude-agent-sdk-python#789.
-    }
-)
-
-# Aggregate set used by the assertion below — the test allows EITHER
-# a directly-known-good CLI OR a proxy-known-good CLI when the proxy
-# is enabled in the active config.
-_KNOWN_GOOD_BUNDLED_CLI_VERSIONS: frozenset[str] = (
-    _KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT | _KNOWN_GOOD_BUNDLED_CLI_VERSIONS_VIA_PROXY
 )
 
 
 def test_bundled_cli_version_is_known_good_against_openrouter():
     """Pin the bundled CLI version so accidental SDK bumps cause a loud,
     fast failure with a pointer to the OpenRouter compatibility issue.
-
-    A CLI version that's only safe via the compat proxy is allowed only
-    when ``ChatConfig.claude_agent_use_compat_proxy`` is enabled.
     """
     from claude_agent_sdk._cli_version import __cli_version__
 
-    from backend.copilot.config import ChatConfig
-
-    cfg = ChatConfig()
-    proxy_enabled = cfg.claude_agent_use_compat_proxy
-
-    if __cli_version__ in _KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT:
-        return  # safe with or without the proxy
-
-    if __cli_version__ in _KNOWN_GOOD_BUNDLED_CLI_VERSIONS_VIA_PROXY:
-        assert proxy_enabled, (
-            f"Bundled Claude Code CLI version {__cli_version__!r} is only "
-            "OpenRouter-safe when `claude_agent_use_compat_proxy` is "
-            "enabled, but the active ChatConfig has the proxy disabled. "
-            "Either set `COPILOT__CLAUDE_AGENT_USE_COMPAT_PROXY=true` or "
-            "downgrade `claude-agent-sdk` to a version whose bundled CLI "
-            f"is in {sorted(_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT)!r}. "
-            "See https://github.com/anthropics/claude-agent-sdk-python/issues/789."
-        )
-        return
-
-    raise AssertionError(
+    assert __cli_version__ in _KNOWN_GOOD_BUNDLED_CLI_VERSIONS, (
         f"Bundled Claude Code CLI version is {__cli_version__!r}, which is "
-        f"not in any OpenRouter-known-good set "
+        f"not in the OpenRouter-known-good set "
         f"({sorted(_KNOWN_GOOD_BUNDLED_CLI_VERSIONS)!r}). "
         "If you intentionally bumped `claude-agent-sdk`, verify the new "
         "bundled CLI works with OpenRouter against the reproduction test "
-        "in `cli_openrouter_compat_test.py`, then add the new CLI version "
-        "to either `_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT` (works "
-        "without the proxy) or `_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_VIA_PROXY` "
-        "(works only with `claude_agent_use_compat_proxy=true`). If you "
-        "cannot make the bundled CLI work either way, set "
-        "`claude_agent_cli_path` to a known-good binary instead. See "
+        "in `cli_openrouter_compat_test.py` (with "
+        "`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`), then add the new "
+        "CLI version to `_KNOWN_GOOD_BUNDLED_CLI_VERSIONS`. If the env "
+        "var is not sufficient, set `claude_agent_cli_path` to a "
+        "known-good binary instead. See "
         "https://github.com/anthropics/claude-agent-sdk-python/issues/789 "
         "and https://github.com/Significant-Gravitas/AutoGPT/pull/12294."
     )

@@ -3,7 +3,7 @@
 import os
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 from backend.util.clients import OPENROUTER_BASE_URL
@@ -186,28 +186,6 @@ class ChatConfig(BaseSettings):
         "or the unprefixed `CLAUDE_AGENT_CLI_PATH` environment variable "
         "(same pattern as `api_key` / `base_url`).",
     )
-    claude_agent_use_compat_proxy: bool = Field(
-        default=True,
-        description="Run the in-process OpenRouter compatibility proxy "
-        "(`backend.copilot.sdk.openrouter_compat_proxy`) in front of the "
-        "Claude Code CLI. The proxy strips `tool_reference` content "
-        "blocks and the `context-management-2025-06-27` beta header / "
-        "field from outgoing requests so newer SDK / CLI versions stop "
-        "tripping OpenRouter's stricter validation. Defaults to True "
-        "because the bundled CLI in `claude-agent-sdk >= 0.1.55` requires "
-        "the proxy. Orthogonal to `claude_agent_cli_path` — the override "
-        "picks the binary, the proxy rewrites whatever the binary sends. "
-        "Disable explicitly only if you've pinned `claude-agent-sdk` to "
-        "a version whose bundled CLI is in "
-        "`_KNOWN_GOOD_BUNDLED_CLI_VERSIONS_DIRECT` (2.1.63 or 2.1.70). "
-        "Reads from `CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY` or the "
-        "unprefixed `CLAUDE_AGENT_USE_COMPAT_PROXY` environment "
-        "variable (same pattern as `claude_agent_cli_path`). Only "
-        "takes effect when the session has an Anthropic-compatible "
-        "upstream to forward to — direct-Anthropic sessions skip the "
-        "proxy entirely to avoid silently re-routing through "
-        "OpenRouter.",
-    )
     use_openrouter: bool = Field(
         default=True,
         description="Enable routing API calls through the OpenRouter proxy. "
@@ -354,37 +332,6 @@ class ChatConfig(BaseSettings):
                 "Check the path and file permissions."
             )
         return v
-
-    @model_validator(mode="before")
-    @classmethod
-    def _inject_unprefixed_compat_proxy_env(cls, values):
-        """Inject the unprefixed ``CLAUDE_AGENT_USE_COMPAT_PROXY`` env var
-        as a fallback for the ``claude_agent_use_compat_proxy`` field.
-
-        Unlike ``claude_agent_cli_path`` (which defaults to ``None`` and
-        can use a simple ``if not v`` guard), this field defaults to
-        ``True``, so a ``mode="before"`` field validator cannot
-        distinguish "caller passed ``False`` explicitly" from "Pydantic
-        resolved the default ``True``" — both arrive as the raw value.
-
-        Using a ``model_validator(mode="before")`` lets us inspect the
-        full input dict: if the key is absent AND the prefixed env var
-        ``CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY`` is not set, we inject the
-        unprefixed value so Pydantic can coerce it (``"1"``/``"true"``
-        → ``True``).  Explicit kwargs always take precedence because
-        they appear in *values* before this validator runs.
-        """
-        if not isinstance(values, dict):
-            return values
-        key = "claude_agent_use_compat_proxy"
-        if key not in values:
-            # No explicit kwarg and Pydantic hasn't injected the
-            # prefixed env var yet — check the unprefixed form.
-            if os.getenv("CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY") is None:
-                unprefixed = os.getenv("CLAUDE_AGENT_USE_COMPAT_PROXY")
-                if unprefixed is not None:
-                    values[key] = unprefixed
-        return values
 
     # Prompt paths for different contexts
     PROMPT_PATHS: dict[str, str] = {

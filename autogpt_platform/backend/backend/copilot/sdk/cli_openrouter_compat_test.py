@@ -392,17 +392,10 @@ async def _run_cli_against_fake_server(
 
 async def _run_reproduction(
     *,
-    route_through_proxy: bool,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[int, str, str, list[_CapturedRequest]]:
     """Spawn the CLI against a fake Anthropic API and return what the
-    *upstream* (post-proxy if any) saw.
-
-    When ``route_through_proxy`` is True, the CLI talks to the
-    ``OpenRouterCompatProxy`` and the proxy forwards to the fake
-    upstream. The fake upstream is what records the requests, so the
-    captured bodies are what OpenRouter would actually have received —
-    *after* the proxy's stripping pass.
+    server saw.
     """
     cli_path = _resolve_cli_path()
     if cli_path is None or not cli_path.is_file():
@@ -415,30 +408,14 @@ async def _run_reproduction(
     captured: list[_CapturedRequest] = []
     upstream_runner, upstream_port = await _start_fake_anthropic_server(captured)
 
-    proxy = None
-    target_port = upstream_port
     try:
-        if route_through_proxy:
-            from backend.copilot.sdk.openrouter_compat_proxy import (
-                OpenRouterCompatProxy,
-            )
-
-            proxy = OpenRouterCompatProxy(
-                target_base_url=f"http://127.0.0.1:{upstream_port}"
-            )
-            await proxy.start()
-            # Pull the bound port out of the proxy URL.
-            target_port = int(proxy.local_url.rsplit(":", 1)[1])
-
         returncode, stdout, stderr = await _run_cli_against_fake_server(
             cli_path=cli_path,
-            fake_server_port=target_port,
+            fake_server_port=upstream_port,
             timeout_seconds=30.0,
             extra_env=extra_env,
         )
     finally:
-        if proxy is not None:
-            await proxy.stop()
         await upstream_runner.cleanup()
 
     return returncode, stdout, stderr, captured
@@ -470,10 +447,9 @@ def _assert_no_forbidden_patterns(
         "`claude-agent-sdk` above 0.1.45. See "
         "https://github.com/Significant-Gravitas/AutoGPT/pull/12294 and "
         "https://github.com/anthropics/claude-agent-sdk-python/issues/789. "
-        "If you intended to upgrade, you must enable the in-process compat "
-        "proxy (`CLAUDE_AGENT_USE_COMPAT_PROXY=true` or the prefixed "
-        "`CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY=true`) or use a known-good "
-        "CLI binary via `claude_agent_cli_path` (env: "
+        "If you intended to upgrade, ensure "
+        "`CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` is set in the SDK env "
+        "or use a known-good CLI binary via `claude_agent_cli_path` (env: "
         "`CLAUDE_AGENT_CLI_PATH` or `CHAT_CLAUDE_AGENT_CLI_PATH`)."
     )
 
@@ -483,74 +459,31 @@ async def test_cli_does_not_send_openrouter_incompatible_features():
     """End-to-end OpenRouter compatibility reproduction (bare CLI path).
 
     Spawns the bundled (or overridden) Claude Code CLI against a fake
-    Anthropic API server WITHOUT the compat proxy in the loop, captures
-    every request body it sends, and asserts that none of them contain
-    the two known OpenRouter-breaking features.
+    Anthropic API server, captures every request body it sends, and
+    asserts that none of them contain the two known OpenRouter-breaking
+    features.
 
     On a clean SDK pin (0.1.45 or 0.1.47, bundled CLI 2.1.63 or 2.1.70)
     this passes naturally.  On a broken pin (0.1.55+, bundled CLI 2.1.91+)
     it fails — that failure IS the bisect signal we use to verify which
     SDK versions need the workaround.
-
-    Skipped when ``claude_agent_use_compat_proxy=True`` because in that
-    configuration the operator has explicitly opted into the workaround
-    and the bare-CLI behaviour is moot — what matters is that the
-    *upstream* (post-proxy) sees clean requests, which is covered by
-    ``test_cli_via_compat_proxy_emits_clean_requests_to_upstream``.
     """
-    from backend.copilot.config import ChatConfig
-
-    if ChatConfig().claude_agent_use_compat_proxy:
-        pytest.skip(
-            "Compat proxy is enabled in the active config — the bare-CLI "
-            "reproduction is not a meaningful signal here. The proxy-routed "
-            "variant `test_cli_via_compat_proxy_emits_clean_requests_to_upstream` "
-            "is the regression guard for this configuration."
-        )
-
-    returncode, _stdout, stderr, captured = await _run_reproduction(
-        route_through_proxy=False
-    )
-    _assert_no_forbidden_patterns(captured, returncode, stderr)
-
-
-@pytest.mark.asyncio
-async def test_cli_via_compat_proxy_emits_clean_requests_to_upstream():
-    """End-to-end test for the compat proxy workaround.
-
-    Spawns the bundled CLI against an in-process fake Anthropic API
-    server WITH the ``OpenRouterCompatProxy`` in front, then asserts
-    that the *upstream* sees clean requests — no `tool_reference`
-    blocks, no `context-management-2025-06-27` beta header — even
-    when the bundled CLI itself would have sent them.
-
-    This is the regression guard for the proxy: if the proxy ever
-    stops stripping a known forbidden pattern, this test catches it.
-    On a SDK version where the bare CLI is already clean (0.1.45 /
-    0.1.47), the proxy is a no-op and the test passes trivially.
-    On a SDK version with the regression (0.1.55+), the test fails
-    if and only if the proxy fails to strip the pattern.
-    """
-    returncode, _stdout, stderr, captured = await _run_reproduction(
-        route_through_proxy=True
-    )
+    returncode, _stdout, stderr, captured = await _run_reproduction()
     _assert_no_forbidden_patterns(captured, returncode, stderr)
 
 
 @pytest.mark.asyncio
 async def test_disable_experimental_betas_env_var_strips_headers():
-    """Validate whether ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`` is
-    sufficient to strip the ``context-management-2025-06-27`` beta header
-    when ``ANTHROPIC_BASE_URL`` points to a non-Anthropic endpoint
-    (simulating OpenRouter).
+    """Validate that ``CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`` strips
+    the ``context-management-2025-06-27`` beta header when
+    ``ANTHROPIC_BASE_URL`` points to a non-Anthropic endpoint (simulating
+    OpenRouter).
 
-    If this test passes, the compat proxy is unnecessary and can be
-    removed — the env var alone is enough.  If it fails, the CLI's
-    provider-detection logic does not honour the env var for custom
-    base URLs and the proxy remains required.
+    This is the main regression guard: the env var is injected by
+    ``service.py`` into every CLI subprocess so newer SDK / CLI versions
+    work with OpenRouter without any proxy.
     """
     returncode, _stdout, stderr, captured = await _run_reproduction(
-        route_through_proxy=False,
         extra_env={"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"},
     )
     _assert_no_forbidden_patterns(captured, returncode, stderr)

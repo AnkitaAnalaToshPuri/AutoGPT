@@ -19,8 +19,6 @@ _ENV_VARS_TO_CLEAR = (
     "OPENAI_BASE_URL",
     "CHAT_CLAUDE_AGENT_CLI_PATH",
     "CLAUDE_AGENT_CLI_PATH",
-    "CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY",
-    "CLAUDE_AGENT_USE_COMPAT_PROXY",
 )
 
 
@@ -124,63 +122,3 @@ class TestClaudeAgentCliPathEnvFallback:
     def test_no_env_var_defaults_to_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = ChatConfig()
         assert cfg.claude_agent_cli_path is None
-
-
-class TestClaudeAgentUseCompatProxyEnvFallback:
-    """``claude_agent_use_compat_proxy`` accepts both the Pydantic-
-    prefixed ``CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY`` env var and the
-    unprefixed ``CLAUDE_AGENT_USE_COMPAT_PROXY`` form.  Regression
-    guard for the bool-default pitfall: the field has a non-None
-    default (``True``), so Pydantic passes the default into the
-    validator when no value is provided and a naive ``if v is None``
-    check would never fire.
-    """
-
-    def test_prefixed_env_var_enables_proxy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY", "true")
-        cfg = ChatConfig()
-        assert cfg.claude_agent_use_compat_proxy is True
-
-    def test_unprefixed_env_var_enables_proxy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("CLAUDE_AGENT_USE_COMPAT_PROXY", "true")
-        cfg = ChatConfig()
-        assert cfg.claude_agent_use_compat_proxy is True
-
-    def test_unprefixed_env_var_respects_falsy_value(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("CLAUDE_AGENT_USE_COMPAT_PROXY", "false")
-        cfg = ChatConfig()
-        assert cfg.claude_agent_use_compat_proxy is False
-
-    def test_prefixed_wins_over_unprefixed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """When both are set, the Pydantic-prefixed var is authoritative
-        so the validator doesn't silently clobber an explicit
-        ``CHAT_...=false`` with an unprefixed ``=true``."""
-        monkeypatch.setenv("CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY", "false")
-        monkeypatch.setenv("CLAUDE_AGENT_USE_COMPAT_PROXY", "true")
-        cfg = ChatConfig()
-        assert cfg.claude_agent_use_compat_proxy is False
-
-    def test_no_env_var_uses_field_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        cfg = ChatConfig()
-        # Dev-preview branch defaults compat_proxy to True (the
-        # bundled CLI in claude-agent-sdk 0.1.58 needs the proxy).
-        assert cfg.claude_agent_use_compat_proxy is True
-
-    def test_explicit_kwarg_not_overridden_by_unprefixed_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Regression: explicit ChatConfig(claude_agent_use_compat_proxy=False)
-        must not be overridden by the unprefixed env var."""
-        monkeypatch.setenv("CLAUDE_AGENT_USE_COMPAT_PROXY", "true")
-        cfg = ChatConfig(claude_agent_use_compat_proxy=False)
-        assert cfg.claude_agent_use_compat_proxy is False

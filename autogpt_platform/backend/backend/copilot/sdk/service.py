@@ -1980,13 +1980,6 @@ async def stream_chat_completion_sdk(
     transcript_content: str = ""
     state: _RetryState | None = None
 
-    # OpenRouter compat proxy — started inside the try and stopped in finally
-    # when ``ChatConfig.claude_agent_use_compat_proxy`` is enabled. The proxy
-    # rewrites outgoing CLI requests to strip ``tool_reference`` content
-    # blocks and the ``context-management-2025-06-27`` beta so the latest
-    # SDK / CLI versions stop tripping OpenRouter's validation.
-    _compat_proxy: Any = None  # OpenRouterCompatProxy | None — lazy import
-
     # Token usage accumulators — populated from ResultMessage at end of turn
     turn_prompt_tokens = 0  # uncached input tokens only
     turn_completion_tokens = 0
@@ -2249,96 +2242,14 @@ async def stream_chat_completion_sdk(
         if sdk_model:
             sdk_options_kwargs["model"] = sdk_model
 
-        # OpenRouter compatibility proxy — started here so its local URL
-        # can be injected into the CLI subprocess env BEFORE the env dict
-        # is passed to ``ClaudeAgentOptions``.  When this flag is on we
-        # transparently rewrite outgoing CLI requests via the proxy
-        # (stripping ``tool_reference`` blocks and the
-        # ``context-management-2025-06-27`` beta) so newer SDK / CLI
-        # versions can talk to OpenRouter without their stricter
-        # validation rejecting the request.
-        if config.claude_agent_use_compat_proxy:
-            # Only start the compat proxy when there's already an
-            # explicit Anthropic-compatible upstream to forward to.
-            # Otherwise we'd be silently routing direct Anthropic /
-            # Claude Code subscription sessions through OpenRouter,
-            # which would break auth and change providers without
-            # operator consent.  The explicit upstream can come from:
-            #
-            # 1. ``sdk_env['ANTHROPIC_BASE_URL']`` — caller override;
-            # 2. the process env — lowest-precedence host override;
-            # 3. ``ChatConfig.openrouter_active`` — OpenRouter is
-            #    configured as the session's routing provider (i.e.
-            #    the only case in which falling back to
-            #    ``OPENROUTER_BASE_URL`` is intentional).
-            #
-            # When none of the above hold, log a warning and leave
-            # the CLI to talk to Anthropic directly as usual — the
-            # feature is opt-in and documented as "OpenRouter
-            # compatibility", so quietly no-oping on direct-Anthropic
-            # sessions is the safe default.
-            # Claude Code subscription mode intentionally sets
-            # ``sdk_env['ANTHROPIC_BASE_URL'] = ""`` to *disable* any
-            # base-URL override and keep the CLI talking to Anthropic
-            # directly. Treat an explicit empty string as a hard
-            # "no-proxy" signal so we never silently start the proxy
-            # against a host-wide ``ANTHROPIC_BASE_URL`` or fall back
-            # to OpenRouter when the caller has opted out.
-            sdk_env_map = sdk_env or {}
-            explicit_sdk_env = "ANTHROPIC_BASE_URL" in sdk_env_map
-            sdk_env_value = (
-                sdk_env_map["ANTHROPIC_BASE_URL"] if explicit_sdk_env else None
-            )
-            if explicit_sdk_env and not sdk_env_value:
-                # Empty string from sdk_env → subscription mode opt-out.
-                target_base_url: str | None = None
-                explicit_opt_out = True
-            else:
-                target_base_url = sdk_env_value or os.environ.get("ANTHROPIC_BASE_URL")
-                explicit_opt_out = False
-            # Only fall back to OpenRouter when the session actually
-            # has no base-URL plumbing of its own AND OpenRouter is
-            # the active routing provider AND the caller hasn't
-            # explicitly opted out via an empty sdk_env override.
-            if (
-                not target_base_url
-                and not explicit_opt_out
-                and config.openrouter_active
-            ):
-                from backend.util.clients import OPENROUTER_BASE_URL
-
-                target_base_url = OPENROUTER_BASE_URL
-
-            if target_base_url:
-                from backend.copilot.sdk.openrouter_compat_proxy import (
-                    OpenRouterCompatProxy,
-                )
-
-                _compat_proxy = OpenRouterCompatProxy(target_base_url=target_base_url)
-                await _compat_proxy.start()
-                # Inject the proxy URL into the SDK env so the spawned
-                # CLI subprocess uses the proxy as its Anthropic
-                # endpoint.
-                if sdk_env is None:
-                    sdk_env = {}
-                sdk_env["ANTHROPIC_BASE_URL"] = _compat_proxy.local_url
-                # Log only the local bind URL — upstream is redacted
-                # to match the taint-analysis guidance applied in
-                # ``openrouter_compat_proxy.start``.
-                logger.info(
-                    "%s OpenRouter compat proxy active (listening on %s)",
-                    log_prefix,
-                    _compat_proxy.local_url,
-                )
-            else:
-                logger.warning(
-                    "%s claude_agent_use_compat_proxy is enabled but no "
-                    "Anthropic-compatible upstream is configured for this "
-                    "session (no ANTHROPIC_BASE_URL override and "
-                    "openrouter_active is False); skipping proxy startup "
-                    "so the CLI keeps talking to Anthropic directly.",
-                    log_prefix,
-                )
+        # Tell the CLI to strip experimental betas (e.g.
+        # ``context-management-2025-06-27``) and ``tool_reference``
+        # content blocks so newer SDK / CLI versions work with
+        # OpenRouter's stricter validation.  This single env var
+        # replaces the old in-process compat proxy.
+        if sdk_env is None:
+            sdk_env = {}
+        sdk_env["CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
 
         if sdk_env:
             sdk_options_kwargs["env"] = sdk_env
@@ -3012,18 +2923,5 @@ async def stream_chat_completion_sdk(
         except Exception:
             logger.warning("%s SDK cleanup failed", log_prefix, exc_info=True)
         finally:
-            # Tear down the OpenRouter compat proxy if it was started for
-            # this session — releases the bound port and the aiohttp
-            # client. Wrapped so a stop failure can never block the
-            # downstream lock release.
-            if _compat_proxy is not None:
-                try:
-                    await _compat_proxy.stop()
-                except Exception:
-                    logger.warning(
-                        "%s OpenRouter compat proxy stop failed",
-                        log_prefix,
-                        exc_info=True,
-                    )
             # Release stream lock to allow new streams for this session
             await lock.release()
