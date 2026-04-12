@@ -110,8 +110,13 @@ _USER_CONTEXT_PREFIX_RE = re.compile(
 # Matches *any* occurrence of a `<user_context>...</user_context>` block,
 # anywhere in the string. Used to defensively strip user-supplied tags from
 # untrusted input before re-injecting the trusted prefix.
+#
+# Uses a **greedy** `.*` so that nested / malformed tags like
+#   `<user_context>bad</user_context>extra</user_context>`
+# are consumed in full rather than leaving `extra</user_context>` as raw
+# text that could confuse an LLM parser.
 _USER_CONTEXT_ANYWHERE_RE = re.compile(
-    rf"<{USER_CONTEXT_TAG}>.*?</{USER_CONTEXT_TAG}>\s*", re.DOTALL
+    rf"<{USER_CONTEXT_TAG}>.*</{USER_CONTEXT_TAG}>\s*", re.DOTALL
 )
 
 
@@ -253,8 +258,16 @@ async def inject_user_context(
     typed by new users do not reach the LLM.
 
     Returns:
-        The sanitised (and optionally prefixed) message string, or ``None``
-        if ``session_messages`` contains no user-role message.
+        ``str`` -- the sanitised (and optionally prefixed) message when
+        ``session_messages`` contains at least one user-role message.
+        This is **always a non-empty string** when a user message exists,
+        even if the content is unchanged (i.e. no attacker tags were found
+        and no understanding was injected).  Callers should therefore
+        **not** use ``if result is not None`` as a proxy for "something
+        changed" -- use it only to detect "no user message was present".
+
+        ``None`` -- only when ``session_messages`` contains **no** user-role
+        message at all.
     """
     sanitized_message = sanitize_user_supplied_context(message)
 
