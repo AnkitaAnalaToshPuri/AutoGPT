@@ -3,7 +3,7 @@
 import os
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from backend.util.clients import OPENROUTER_BASE_URL
@@ -350,34 +350,36 @@ class ChatConfig(BaseSettings):
                 v = os.getenv("CLAUDE_AGENT_CLI_PATH")
         return v
 
-    @field_validator("claude_agent_use_compat_proxy", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def get_claude_agent_use_compat_proxy(cls, v):
-        """Resolve the compat-proxy opt-in from environment.
+    def _inject_unprefixed_compat_proxy_env(cls, values):
+        """Inject the unprefixed ``CLAUDE_AGENT_USE_COMPAT_PROXY`` env var
+        as a fallback for the ``claude_agent_use_compat_proxy`` field.
 
-        Accepts either ``CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY`` (the
-        Pydantic-prefixed form) or the unprefixed
-        ``CLAUDE_AGENT_USE_COMPAT_PROXY`` — same dual-name pattern as
-        ``claude_agent_cli_path`` above and ``api_key`` / ``base_url``
-        further up. Returning the raw string lets Pydantic handle the
-        usual truthy/falsy coercion (``"1"``, ``"true"``, ``"yes"``,
-        ``"on"`` → True), so operators get the same behaviour they'd
-        get from the prefixed env var.
+        Unlike ``claude_agent_cli_path`` (which defaults to ``None`` and
+        can use a simple ``if not v`` guard), this field defaults to
+        ``True``, so a ``mode="before"`` field validator cannot
+        distinguish "caller passed ``False`` explicitly" from "Pydantic
+        resolved the default ``True``" — both arrive as the raw value.
 
-        Note: unlike the ``claude_agent_cli_path`` case, this field has
-        a non-``None`` default (``False``), so Pydantic passes the
-        default bool into the validator when no value is set — a
-        simple ``if v is None`` check wouldn't fire. We instead inspect
-        the raw process env directly: if the prefixed var is set we
-        let Pydantic's value stand; otherwise the unprefixed var wins.
+        Using a ``model_validator(mode="before")`` lets us inspect the
+        full input dict: if the key is absent AND the prefixed env var
+        ``CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY`` is not set, we inject the
+        unprefixed value so Pydantic can coerce it (``"1"``/``"true"``
+        → ``True``).  Explicit kwargs always take precedence because
+        they appear in *values* before this validator runs.
         """
-        if os.getenv("CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY") is not None:
-            # Prefixed var is set — trust Pydantic's parsed value.
-            return v
-        unprefixed = os.getenv("CLAUDE_AGENT_USE_COMPAT_PROXY")
-        if unprefixed is not None:
-            return unprefixed
-        return v
+        if not isinstance(values, dict):
+            return values
+        key = "claude_agent_use_compat_proxy"
+        if key not in values:
+            # No explicit kwarg and Pydantic hasn't injected the
+            # prefixed env var yet — check the unprefixed form.
+            if os.getenv("CHAT_CLAUDE_AGENT_USE_COMPAT_PROXY") is None:
+                unprefixed = os.getenv("CLAUDE_AGENT_USE_COMPAT_PROXY")
+                if unprefixed is not None:
+                    values[key] = unprefixed
+        return values
 
     # Prompt paths for different contexts
     PROMPT_PATHS: dict[str, str] = {

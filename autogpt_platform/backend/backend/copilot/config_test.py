@@ -175,3 +175,12 @@ class TestClaudeAgentUseCompatProxyEnvFallback:
         # Dev-preview branch defaults compat_proxy to True (the
         # bundled CLI in claude-agent-sdk 0.1.58 needs the proxy).
         assert cfg.claude_agent_use_compat_proxy is True
+
+    def test_explicit_kwarg_not_overridden_by_unprefixed_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Regression: explicit ChatConfig(claude_agent_use_compat_proxy=False)
+        must not be overridden by the unprefixed env var."""
+        monkeypatch.setenv("CLAUDE_AGENT_USE_COMPAT_PROXY", "true")
+        cfg = ChatConfig(claude_agent_use_compat_proxy=False)
+        assert cfg.claude_agent_use_compat_proxy is False

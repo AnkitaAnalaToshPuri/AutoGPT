@@ -428,7 +428,7 @@ class OpenRouterCompatProxy:
             # internal hostnames, ports, or stack frames (CodeQL
             # `py/stack-trace-exposure`).
             logger.warning(
-                "OpenRouter compat proxy upstream error: %s (url=%s)", e, upstream_url
+                "OpenRouter compat proxy upstream error: %s", type(e).__name__
             )
             return web.Response(status=502, text="upstream error")
 

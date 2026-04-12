@@ -287,11 +287,13 @@ def _resolve_cli_path() -> Path | None:
         return candidate if candidate.is_file() else None
 
     try:
-        from claude_agent_sdk._internal.transport.subprocess_cli import (  # type: ignore[import-untyped]
+        from typing import cast
+
+        from claude_agent_sdk._internal.transport.subprocess_cli import (
             SubprocessCLITransport,
         )
 
-        bundled = SubprocessCLITransport._find_bundled_cli(None)  # type: ignore[arg-type]
+        bundled = cast(str, SubprocessCLITransport._find_bundled_cli(None))
         return Path(bundled) if bundled else None
     except Exception as e:  # pragma: no cover - import-time guard
         logger.warning("Could not locate bundled Claude CLI: %s", e)
