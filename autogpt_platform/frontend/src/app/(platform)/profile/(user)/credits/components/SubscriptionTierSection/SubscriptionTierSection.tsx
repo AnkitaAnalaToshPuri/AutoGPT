@@ -98,7 +98,7 @@ export function SubscriptionTierSection() {
       setConfirmDowngradeTo(tierKey);
       return;
     }
-    changeTier(tierKey);
+    void changeTier(tierKey);
   }
 
   async function confirmDowngrade() {
@@ -211,7 +211,10 @@ export function SubscriptionTierSection() {
             >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void confirmDowngrade()}>
+            <Button
+              variant="destructive"
+              onClick={() => void confirmDowngrade()}
+            >
               Confirm Downgrade
             </Button>
           </Dialog.Footer>
