@@ -37,6 +37,7 @@ async def test_get_library_agents(mocker):
             isCreatedByUser=False,
             isDeleted=False,
             isArchived=False,
+            isHidden=False,
             createdAt=datetime.now(),
             updatedAt=datetime.now(),
             isFavorite=False,
