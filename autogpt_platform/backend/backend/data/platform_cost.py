@@ -351,7 +351,6 @@ async def get_platform_cost_dashboard(
         "trackingAmount": True,
     }
 
-<<<<<<< HEAD
     # Build parameterised WHERE clause for the raw SQL percentile/bucket
     # queries.  Uses _build_raw_where so filter logic is shared with
     # _build_prisma_where and only maintained in one place.
@@ -364,15 +363,6 @@ async def get_platform_cost_dashboard(
 
     # Queries that always run regardless of tracking_type filter.
     common_queries = [
-=======
-    # Run all four aggregation queries in parallel.
-    (
-        by_provider_groups,
-        by_user_groups,
-        total_user_groups,
-        total_agg_groups,
-    ) = await asyncio.gather(
->>>>>>> c6af52033dc97f673af7a968564d14fbb2949707
         # (provider, trackingType, model) aggregation — no ORDER BY in ORM;
         # sort by total cost descending in Python after fetch.
         PrismaLog.prisma().group_by(
@@ -388,7 +378,6 @@ async def get_platform_cost_dashboard(
             sum=sum_fields,
             count=True,
         ),
-<<<<<<< HEAD
         # Per-user cost-bearing request count: group by (userId, trackingType)
         # so we can compute the correct denominator for per-user avg cost.
         # Uses where_no_tracking_type so cost_usd rows are always included
@@ -398,15 +387,12 @@ async def get_platform_cost_dashboard(
             where=where_no_tracking_type,
             count=True,
         ),
-=======
->>>>>>> c6af52033dc97f673af7a968564d14fbb2949707
         # Distinct user count: group by userId, count groups.
         PrismaLog.prisma().group_by(
             by=["userId"],
             where=where,
             count=True,
         ),
-<<<<<<< HEAD
         # Total aggregate (filtered): group by (provider, trackingType) so we can
         # compute grand totals for cost/tokens within the active filter window.
         PrismaLog.prisma().group_by(
@@ -496,16 +482,6 @@ async def get_platform_cost_dashboard(
     # identical — reuse total_agg_groups to avoid the extra DB round-trip.
     total_agg_no_tracking_type_groups = (
         results[7] if tracking_type is not None else total_agg_groups
-=======
-        # Total aggregate: group by provider (no limit) to sum across all
-        # matching rows. Summed in Python to get grand totals.
-        PrismaLog.prisma().group_by(
-            by=["provider"],
-            where=where,
-            sum={"costMicrodollars": True},
-            count=True,
-        ),
->>>>>>> c6af52033dc97f673af7a968564d14fbb2949707
     )
 
     # Sort by_provider by total cost descending and cap at MAX_PROVIDER_ROWS.
