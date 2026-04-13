@@ -337,6 +337,11 @@ export const useCopilotUIStore = create<CopilotUIState>((set) => ({
     set((state) => {
       const next = new Map(state.sessionModes);
       next.set(sessionId, state.copilotMode);
+      // Cap at 200 entries — prune oldest when exceeded
+      if (next.size > 200) {
+        const oldest = next.keys().next().value;
+        if (oldest) next.delete(oldest);
+      }
       persistSessionModes(next);
       return { sessionModes: next };
     }),
