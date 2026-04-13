@@ -15,6 +15,8 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, TypedDict, cast
 
+from typing_extensions import NotRequired
+
 
 class _SystemPromptPreset(TypedDict):
     """Local stand-in for the SDK's SystemPromptPreset.
@@ -27,8 +29,8 @@ class _SystemPromptPreset(TypedDict):
 
     type: Literal["preset"]
     preset: Literal["claude_code"]
-    append: str
-    exclude_dynamic_sections: bool
+    append: NotRequired[str]
+    exclude_dynamic_sections: NotRequired[bool]  # SDK >=0.1.58
 
 
 if TYPE_CHECKING:

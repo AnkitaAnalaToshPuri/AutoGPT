@@ -687,7 +687,7 @@ class TestSystemPromptPreset:
         assert isinstance(result, str)
         assert result == custom_prompt
 
-    def test_default_config_is_enabled(self, monkeypatch, _clean_config_env):
+    def test_default_config_is_enabled(self, _clean_config_env):
         """The default value for claude_agent_cross_user_prompt_cache is True."""
         from backend.copilot import config as cfg_mod
 
