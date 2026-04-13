@@ -43,6 +43,10 @@ from backend.copilot.rate_limit import (
 )
 from backend.copilot.response_model import StreamError, StreamFinish, StreamHeartbeat
 from backend.copilot.tools.e2b_sandbox import kill_sandbox
+from backend.copilot.tools.manage_schedules import (
+    ScheduleDeletedResponse,
+    ScheduleListResponse,
+)
 from backend.copilot.tools.models import (
     AgentDetailsResponse,
     AgentOutputResponse,
@@ -1264,6 +1268,8 @@ ToolResponseUnion = (
     | DocPageResponse
     | MCPToolsDiscoveredResponse
     | MCPToolOutputResponse
+    | ScheduleListResponse
+    | ScheduleDeletedResponse
 )
 
 

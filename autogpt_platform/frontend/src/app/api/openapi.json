@@ -1319,7 +1319,9 @@
                     {
                       "$ref": "#/components/schemas/MCPToolsDiscoveredResponse"
                     },
-                    { "$ref": "#/components/schemas/MCPToolOutputResponse" }
+                    { "$ref": "#/components/schemas/MCPToolOutputResponse" },
+                    { "$ref": "#/components/schemas/ScheduleListResponse" },
+                    { "$ref": "#/components/schemas/ScheduleDeletedResponse" }
                   ],
                   "title": "Response Getv2[Dummy] Tool Response Type Export For Codegen"
                 }
@@ -13014,6 +13016,69 @@
         "type": "object",
         "required": ["name", "cron", "inputs"],
         "title": "ScheduleCreationRequest"
+      },
+      "ScheduleDeletedResponse": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ResponseType",
+            "default": "schedule_deleted"
+          },
+          "message": { "type": "string", "title": "Message" },
+          "session_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Session Id"
+          },
+          "schedule_id": { "type": "string", "title": "Schedule Id" }
+        },
+        "type": "object",
+        "required": ["message", "schedule_id"],
+        "title": "ScheduleDeletedResponse",
+        "description": "Response confirming a schedule was deleted."
+      },
+      "ScheduleListResponse": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ResponseType",
+            "default": "schedule_list"
+          },
+          "message": { "type": "string", "title": "Message" },
+          "session_id": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Session Id"
+          },
+          "schedules": {
+            "items": { "$ref": "#/components/schemas/ScheduleSummary" },
+            "type": "array",
+            "title": "Schedules"
+          }
+        },
+        "type": "object",
+        "required": ["message", "schedules"],
+        "title": "ScheduleListResponse",
+        "description": "Response containing a list of schedules."
+      },
+      "ScheduleSummary": {
+        "properties": {
+          "schedule_id": { "type": "string", "title": "Schedule Id" },
+          "name": { "type": "string", "title": "Name" },
+          "cron": { "type": "string", "title": "Cron" },
+          "timezone": { "type": "string", "title": "Timezone" },
+          "next_run_time": { "type": "string", "title": "Next Run Time" },
+          "graph_id": { "type": "string", "title": "Graph Id" },
+          "graph_version": { "type": "integer", "title": "Graph Version" }
+        },
+        "type": "object",
+        "required": [
+          "schedule_id",
+          "name",
+          "cron",
+          "timezone",
+          "next_run_time",
+          "graph_id",
+          "graph_version"
+        ],
+        "title": "ScheduleSummary",
+        "description": "Summary of a single schedule."
       },
       "SearchEntry": {
         "properties": {
