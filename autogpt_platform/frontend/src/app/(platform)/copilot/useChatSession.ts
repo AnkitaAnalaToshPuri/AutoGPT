@@ -19,7 +19,7 @@ export function useChatSession({ dryRun = false }: UseChatSessionOptions = {}) {
   const [sessionId, setSessionId] = useQueryState("sessionId", parseAsString);
   const queryClient = useQueryClient();
 
-  const sessionQuery = useGetV2GetSession(sessionId ?? "", {
+  const sessionQuery = useGetV2GetSession(sessionId ?? "", undefined, {
     query: {
       enabled: !!sessionId,
       staleTime: Infinity, // Manual invalidation on session switch
