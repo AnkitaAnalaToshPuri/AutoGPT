@@ -18,19 +18,20 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, TypedDict, cast
 from typing_extensions import NotRequired
 
 
+# TODO(#12747): Remove this local TypedDict and import SystemPromptPreset
+# from claude_agent_sdk.types once SDK >=0.1.58 is the minimum pin.
 class _SystemPromptPreset(TypedDict):
-    """Local stand-in for the SDK's SystemPromptPreset.
+    """Local stand-in for the SDK's ``SystemPromptPreset`` (mirrors SDK >=0.1.58).
 
-    The production SDK (>=0.1.58) defines this type natively.  We keep a
-    local copy so that:
-      1. The code type-checks on older SDK pins (e.g. 0.1.45 on dev).
-      2. Tests can import and verify the shape without an SDK upgrade.
+    Kept only for backwards compat with older SDK pins (e.g. 0.1.45 on dev).
+    Once the minimum SDK version is pinned to >=0.1.58, replace this with a
+    direct import from ``claude_agent_sdk.types``.
     """
 
     type: Literal["preset"]
     preset: Literal["claude_code"]
     append: NotRequired[str]
-    exclude_dynamic_sections: NotRequired[bool]  # SDK >=0.1.58
+    exclude_dynamic_sections: NotRequired[bool]
 
 
 if TYPE_CHECKING:
@@ -727,15 +728,21 @@ def _build_system_prompt_value(
     dict so the Claude Code default prompt becomes a cacheable prefix shared
     across all users; our custom *system_prompt* is appended after it.
 
-    When disabled, the raw *system_prompt* string is returned unchanged.
+    When disabled (or if the SDK is too old to support ``SystemPromptPreset``),
+    the raw *system_prompt* string is returned unchanged.
+
+    An empty *system_prompt* is accepted: the preset dict will have
+    ``append: ""`` which the SDK treats as no custom suffix.
     """
     if cross_user_cache:
+        logger.debug("Using SystemPromptPreset for cross-user prompt cache")
         return _SystemPromptPreset(
             type="preset",
             preset="claude_code",
             append=system_prompt,
             exclude_dynamic_sections=True,
         )
+    logger.debug("Cross-user prompt cache disabled, using raw string")
     return system_prompt
 
 
@@ -2260,12 +2267,7 @@ async def stream_chat_completion_sdk(
                     sid,
                 )
 
-        # When cross-user prompt caching is enabled, use SystemPromptPreset
-        # so the Claude Code default prompt is a cacheable prefix shared
-        # across all users.  Our custom prompt is appended after it and
-        # dynamic sections (working dir, git status, auto-memory) are
-        # excluded from the prefix — giving us cross-user cache hits that
-        # reduce input token cost by ~90%.
+        # Use SystemPromptPreset for cross-user prompt caching (see _build_system_prompt_value).
         system_prompt_value = _build_system_prompt_value(
             system_prompt,
             cross_user_cache=config.claude_agent_cross_user_prompt_cache,
