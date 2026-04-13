@@ -229,12 +229,12 @@ describe("useCopilotUIStore", () => {
 
       useCopilotUIStore.getState().removeSessionMode("session-1");
 
-      expect(
-        useCopilotUIStore.getState().sessionModes.has("session-1"),
-      ).toBe(false);
-      expect(
-        useCopilotUIStore.getState().sessionModes.get("session-2"),
-      ).toBe("extended_thinking");
+      expect(useCopilotUIStore.getState().sessionModes.has("session-1")).toBe(
+        false,
+      );
+      expect(useCopilotUIStore.getState().sessionModes.get("session-2")).toBe(
+        "extended_thinking",
+      );
       // localStorage should only have session-2
       const raw = window.localStorage.getItem("copilot-session-modes");
       const parsed = JSON.parse(raw!) as [string, string][];
