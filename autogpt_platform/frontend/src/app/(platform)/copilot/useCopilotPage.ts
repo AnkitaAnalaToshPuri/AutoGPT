@@ -46,6 +46,7 @@ export function useCopilotPage() {
     isDryRun,
     recordSessionMode,
     restoreSessionMode,
+    removeSessionMode,
   } = useCopilotUIStore();
 
   const {
@@ -109,6 +110,9 @@ export function useCopilotPage() {
           if (sessionToDelete?.id === sessionId) {
             setSessionId(null);
           }
+          if (sessionToDelete?.id) {
+            removeSessionMode(sessionToDelete.id);
+          }
           setSessionToDelete(null);
         },
         onError: (error) => {
@@ -169,7 +173,7 @@ export function useCopilotPage() {
     } else {
       sendMessage({ text: msg });
     }
-  }, [sessionId, pendingMessage, sendMessage]);
+  }, [sessionId, pendingMessage, sendMessage, recordSessionMode]);
 
   // --- Extract prompt from URL hash on mount (e.g. /copilot#prompt=Hello) ---
   useWorkflowImportAutoSubmit({

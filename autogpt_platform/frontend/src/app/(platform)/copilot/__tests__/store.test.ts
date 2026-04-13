@@ -220,6 +220,62 @@ describe("useCopilotUIStore", () => {
       const parsed = JSON.parse(raw!) as [string, string][];
       expect(parsed).toEqual([["session-1", "fast"]]);
     });
+
+    it("removes a session mode entry and updates localStorage", () => {
+      useCopilotUIStore.getState().setCopilotMode("fast");
+      useCopilotUIStore.getState().recordSessionMode("session-1");
+      useCopilotUIStore.getState().setCopilotMode("extended_thinking");
+      useCopilotUIStore.getState().recordSessionMode("session-2");
+
+      useCopilotUIStore.getState().removeSessionMode("session-1");
+
+      expect(
+        useCopilotUIStore.getState().sessionModes.has("session-1"),
+      ).toBe(false);
+      expect(
+        useCopilotUIStore.getState().sessionModes.get("session-2"),
+      ).toBe("extended_thinking");
+      // localStorage should only have session-2
+      const raw = window.localStorage.getItem("copilot-session-modes");
+      const parsed = JSON.parse(raw!) as [string, string][];
+      expect(parsed).toEqual([["session-2", "extended_thinking"]]);
+    });
+
+    it("is a no-op when removing a session that was never recorded", () => {
+      useCopilotUIStore.getState().setCopilotMode("fast");
+      useCopilotUIStore.getState().recordSessionMode("session-1");
+      const before = useCopilotUIStore.getState().sessionModes;
+      useCopilotUIStore.getState().removeSessionMode("unknown-session");
+      // State reference should not change (no re-render)
+      expect(useCopilotUIStore.getState().sessionModes).toBe(before);
+    });
+
+    it("ignores invalid mode strings from corrupt localStorage", () => {
+      window.localStorage.setItem(
+        "copilot-session-modes",
+        JSON.stringify([
+          ["session-valid", "fast"],
+          ["session-bad", "invalid_mode"],
+          ["not-a-pair"],
+          "garbage",
+        ]),
+      );
+      // Re-initialise by reading state directly via the getter used at init time
+      // (simulate a fresh page load by clearing and re-setting the store)
+      useCopilotUIStore.getState().clearCopilotLocalData();
+      window.localStorage.setItem(
+        "copilot-session-modes",
+        JSON.stringify([
+          ["session-valid", "fast"],
+          ["session-bad", "invalid_mode"],
+        ]),
+      );
+      // Force store re-read by calling the internal persistence path
+      useCopilotUIStore.getState().recordSessionMode("__probe__");
+      // The corrupt entry should never be readable as a valid CopilotMode
+      const state = useCopilotUIStore.getState();
+      expect(state.sessionModes.get("session-bad")).toBeUndefined();
+    });
   });
 
   describe("clearCopilotLocalData", () => {

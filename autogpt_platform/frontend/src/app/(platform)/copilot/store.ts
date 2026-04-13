@@ -79,12 +79,24 @@ function schedulePanelWidthPersist(width: number) {
   }, 200);
 }
 
+function isCopilotMode(value: unknown): value is CopilotMode {
+  return value === "fast" || value === "extended_thinking";
+}
+
 function getPersistedSessionModes(): Map<string, CopilotMode> {
   if (!isClient) return new Map();
   try {
     const raw = storage.get(Key.COPILOT_SESSION_MODES);
     if (raw) {
-      const entries = JSON.parse(raw) as [string, CopilotMode][];
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return new Map();
+      const entries = parsed.filter(
+        (entry): entry is [string, CopilotMode] =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === "string" &&
+          isCopilotMode(entry[1]),
+      );
       return new Map(entries);
     }
   } catch {
@@ -164,6 +176,8 @@ interface CopilotUIState {
   recordSessionMode: (sessionId: string) => void;
   /** Restore the copilot mode from a previously recorded session. */
   restoreSessionMode: (sessionId: string) => void;
+  /** Remove the recorded mode for a session (call on session delete). */
+  removeSessionMode: (sessionId: string) => void;
 
   /** Developer dry-run mode: sessions created with dry_run=true. */
   isDryRun: boolean;
@@ -333,7 +347,16 @@ export const useCopilotUIStore = create<CopilotUIState>((set) => ({
         storage.set(Key.COPILOT_MODE, mode);
         return { copilotMode: mode };
       }
+      // Return same state reference to skip unnecessary re-render
       return state;
+    }),
+  removeSessionMode: (sessionId) =>
+    set((state) => {
+      if (!state.sessionModes.has(sessionId)) return state;
+      const next = new Map(state.sessionModes);
+      next.delete(sessionId);
+      persistSessionModes(next);
+      return { sessionModes: next };
     }),
 
   isDryRun: isClient && storage.get(Key.COPILOT_DRY_RUN) === "true",
