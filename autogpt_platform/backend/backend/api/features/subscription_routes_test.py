@@ -394,6 +394,50 @@ def test_update_subscription_tier_enterprise_blocked(
     set_tier_mock.assert_not_awaited()
 
 
+def test_update_subscription_tier_same_tier_is_noop(
+    client: fastapi.testclient.TestClient,
+    mocker: pytest_mock.MockFixture,
+) -> None:
+    """POST /credits/subscription for the user's current paid tier returns 200 with empty URL.
+
+    Without this guard a duplicate POST (double-click, browser retry, stale page) would
+    create a second Stripe Checkout Session for the same price, potentially billing the
+    user twice until the webhook reconciliation fires.
+    """
+    mock_user = Mock()
+    mock_user.subscription_tier = SubscriptionTier.PRO
+
+    async def mock_feature_enabled(*args, **kwargs):
+        return True
+
+    mocker.patch(
+        "backend.api.features.v1.get_user_by_id",
+        new_callable=AsyncMock,
+        return_value=mock_user,
+    )
+    mocker.patch(
+        "backend.api.features.v1.is_feature_enabled",
+        side_effect=mock_feature_enabled,
+    )
+    checkout_mock = mocker.patch(
+        "backend.api.features.v1.create_subscription_checkout",
+        new_callable=AsyncMock,
+    )
+
+    response = client.post(
+        "/credits/subscription",
+        json={
+            "tier": "PRO",
+            "success_url": f"{TEST_FRONTEND_ORIGIN}/success",
+            "cancel_url": f"{TEST_FRONTEND_ORIGIN}/cancel",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["url"] == ""
+    checkout_mock.assert_not_awaited()
+
+
 def test_update_subscription_tier_free_with_payment_cancels_stripe(
     client: fastapi.testclient.TestClient,
     mocker: pytest_mock.MockFixture,

@@ -700,7 +700,7 @@ class SubscriptionCheckoutResponse(BaseModel):
 
 
 class SubscriptionStatusResponse(BaseModel):
-    tier: str
+    tier: Literal["FREE", "PRO", "BUSINESS", "ENTERPRISE"]
     monthly_cost: int  # amount in cents (Stripe convention)
     tier_costs: dict[str, int]  # tier name -> amount in cents
 

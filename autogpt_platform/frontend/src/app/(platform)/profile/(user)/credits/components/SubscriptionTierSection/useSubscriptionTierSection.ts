@@ -35,14 +35,21 @@ export function useSubscriptionTierSection() {
   } = useUpdateSubscriptionTier();
 
   useEffect(() => {
-    if (subscriptionStatus === "success" && !toastShownRef.current) {
-      toastShownRef.current = true;
-      refetch();
-      toast({
-        title: "Subscription upgraded",
-        description:
-          "Your plan has been updated. It may take a moment to reflect.",
-      });
+    if (subscriptionStatus === "success") {
+      if (!toastShownRef.current) {
+        toastShownRef.current = true;
+        refetch();
+        toast({
+          title: "Subscription upgraded",
+          description:
+            "Your plan has been updated. It may take a moment to reflect.",
+        });
+      }
+    } else {
+      // Reset so the toast fires again if the user completes another checkout
+      // during the same mount (e.g. SPA navigation away and back with a new
+      // ?subscription=success param).
+      toastShownRef.current = false;
     }
   }, [subscriptionStatus, refetch, toast]);
 
