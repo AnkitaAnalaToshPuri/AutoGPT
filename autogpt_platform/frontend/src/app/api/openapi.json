@@ -15575,17 +15575,17 @@
             "type": "integer",
             "title": "Total Output Tokens"
           },
-          "request_count": { "type": "integer", "title": "Request Count" },
           "total_cache_read_tokens": {
-            "default": 0,
+            "type": "integer",
             "title": "Total Cache Read Tokens",
-            "type": "integer"
+            "default": 0
           },
           "total_cache_creation_tokens": {
-            "default": 0,
+            "type": "integer",
             "title": "Total Cache Creation Tokens",
-            "type": "integer"
-          }
+            "default": 0
+          },
+          "request_count": { "type": "integer", "title": "Request Count" }
         },
         "type": "object",
         "required": [
