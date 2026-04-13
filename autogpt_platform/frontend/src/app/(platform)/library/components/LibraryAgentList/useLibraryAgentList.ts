@@ -216,9 +216,10 @@ export function useLibraryAgentList({
     query: { select: okData },
   });
 
-  const { activeGraphIds, errorGraphIds } = useMemo(() => {
+  const { activeGraphIds, errorGraphIds, completedGraphIds } = useMemo(() => {
     const active = new Set<string>();
     const errors = new Set<string>();
+    const completed = new Set<string>();
     const cutoff = Date.now() - 72 * 60 * 60 * 1000;
     for (const exec of executions ?? []) {
       if (
@@ -228,18 +229,27 @@ export function useLibraryAgentList({
       ) {
         active.add(exec.graph_id);
       }
+      const endedTs = exec.ended_at
+        ? exec.ended_at instanceof Date
+          ? exec.ended_at.getTime()
+          : new Date(String(exec.ended_at)).getTime()
+        : 0;
       if (
         (exec.status === AgentExecutionStatus.FAILED ||
           exec.status === AgentExecutionStatus.TERMINATED) &&
-        exec.ended_at &&
-        (exec.ended_at instanceof Date
-          ? exec.ended_at.getTime()
-          : new Date(String(exec.ended_at)).getTime()) > cutoff
+        endedTs > cutoff
       ) {
         errors.add(exec.graph_id);
       }
+      if (exec.status === AgentExecutionStatus.COMPLETED && endedTs > cutoff) {
+        completed.add(exec.graph_id);
+      }
     }
-    return { activeGraphIds: active, errorGraphIds: errors };
+    return {
+      activeGraphIds: active,
+      errorGraphIds: errors,
+      completedGraphIds: completed,
+    };
   }, [executions]);
 
   const filteredAgents = filterAgentsByStatus(
@@ -247,6 +257,7 @@ export function useLibraryAgentList({
     statusFilter,
     activeGraphIds,
     errorGraphIds,
+    completedGraphIds,
   );
 
   // Track consecutive pages that produced no new filtered items
@@ -327,6 +338,7 @@ function filterAgentsByStatus<
   statusFilter: AgentStatusFilter,
   activeGraphIds: Set<string>,
   errorGraphIds: Set<string>,
+  completedGraphIds: Set<string>,
 ): T[] {
   if (statusFilter === "all") return agents;
   return agents.filter((agent) => {
@@ -335,6 +347,8 @@ function filterAgentsByStatus<
 
     if (statusFilter === "running") return isRunning;
     if (statusFilter === "attention") return hasError && !isRunning;
+    if (statusFilter === "completed")
+      return completedGraphIds.has(agent.graph_id);
     if (statusFilter === "listening")
       return !isRunning && !hasError && agent.has_external_trigger;
     if (statusFilter === "scheduled")

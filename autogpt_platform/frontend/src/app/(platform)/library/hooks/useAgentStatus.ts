@@ -136,29 +136,29 @@ export function useFleetSummary(agents: LibraryAgent[]): FleetSummary {
       monthlySpend: 0,
     };
 
-    if (!executions) return counts;
-
     const activeGraphIds = new Set<string>();
     const errorGraphIds = new Set<string>();
     const completedGraphIds = new Set<string>();
-    const cutoff = Date.now() - SEVENTY_TWO_HOURS_MS;
 
-    for (const exec of executions) {
-      if (isActive(exec.status)) {
-        activeGraphIds.add(exec.graph_id);
-      }
-      const endedTs = exec.ended_at
-        ? new Date(
-            exec.ended_at instanceof Date
-              ? exec.ended_at.getTime()
-              : exec.ended_at,
-          ).getTime()
-        : 0;
-      if (isFailed(exec.status) && endedTs > cutoff) {
-        errorGraphIds.add(exec.graph_id);
-      }
-      if (exec.status === "COMPLETED" && endedTs > cutoff) {
-        completedGraphIds.add(exec.graph_id);
+    if (executions) {
+      const cutoff = Date.now() - SEVENTY_TWO_HOURS_MS;
+      for (const exec of executions) {
+        if (isActive(exec.status)) {
+          activeGraphIds.add(exec.graph_id);
+        }
+        const endedTs = exec.ended_at
+          ? new Date(
+              exec.ended_at instanceof Date
+                ? exec.ended_at.getTime()
+                : exec.ended_at,
+            ).getTime()
+          : 0;
+        if (isFailed(exec.status) && endedTs > cutoff) {
+          errorGraphIds.add(exec.graph_id);
+        }
+        if (exec.status === "COMPLETED" && endedTs > cutoff) {
+          completedGraphIds.add(exec.graph_id);
+        }
       }
     }
 

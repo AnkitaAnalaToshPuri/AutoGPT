@@ -187,7 +187,6 @@ export function AgentCardMenu({ agent }: AgentCardMenuProps) {
           >
             Duplicate agent
           </DropdownMenuItem>
-          {}
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={(e) => {

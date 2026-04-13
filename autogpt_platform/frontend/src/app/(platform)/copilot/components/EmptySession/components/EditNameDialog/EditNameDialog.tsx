@@ -19,9 +19,9 @@ export function EditNameDialog({ currentName }: Props) {
   const { supabase, refreshSession } = useSupabase();
   const { toast } = useToast();
 
-  function handleOpen() {
-    setName(currentName);
-    setIsOpen(true);
+  function handleOpenChange(open: boolean) {
+    if (open) setName(currentName);
+    setIsOpen(open);
   }
 
   async function handleSave() {
@@ -52,12 +52,11 @@ export function EditNameDialog({ currentName }: Props) {
     <Dialog
       title="Edit display name"
       styling={{ maxWidth: "24rem" }}
-      controlled={{ isOpen, set: setIsOpen }}
+      controlled={{ isOpen, set: handleOpenChange }}
     >
       <Dialog.Trigger>
         <button
           type="button"
-          onClick={handleOpen}
           className="ml-1 inline-flex items-center text-violet-500 transition-colors hover:text-violet-700"
         >
           <PencilSimpleIcon size={16} />
