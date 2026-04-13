@@ -1016,6 +1016,10 @@ async def llm_call(
         client = anthropic.AsyncAnthropic(
             api_key=credentials.api_key.get_secret_value()
         )
+        # create_kwargs is built as a plain dict so we can conditionally add
+        # the `system` field only when the prompt is non-empty.  Anthropic's
+        # API rejects empty text blocks (returns HTTP 400), so omitting the
+        # field is the correct behaviour for whitespace-only prompts.
         create_kwargs: dict[str, Any] = dict(
             model=llm_model.value,
             messages=messages,
@@ -1024,6 +1028,9 @@ async def llm_call(
             timeout=600,
         )
         if sysprompt.strip():
+            # Wrap the system prompt in a single cacheable text block.
+            # The guard intentionally omits `system` for whitespace-only
+            # prompts — Anthropic rejects empty text blocks with HTTP 400.
             create_kwargs["system"] = [
                 {
                     "type": "text",
