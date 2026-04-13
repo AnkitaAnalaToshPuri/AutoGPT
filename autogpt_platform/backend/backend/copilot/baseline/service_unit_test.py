@@ -650,6 +650,36 @@ class TestEstimateCostFromTokens:
         cost = _estimate_cost_from_tokens("openai/gpt-4o", 0, 0)
         assert cost == pytest.approx(0.0)
 
+    def test_claude_opus_4_6_in_pricing_table(self):
+        """anthropic/claude-opus-4.6 (default non-fast model) must be priced."""
+        cost = _estimate_cost_from_tokens("anthropic/claude-opus-4.6", 1000, 500)
+        # 1000 * 15.0/1M + 500 * 75.0/1M = 0.015 + 0.0375 = 0.0525
+        assert cost == pytest.approx(0.0525)
+
+    def test_cache_read_tokens_discounted_anthropic(self):
+        """Cache-read tokens billed at 10 % of input rate for Anthropic models."""
+        # 200 regular + 800 cache-read prompt tokens, 0 completion
+        # cost = 200 * 3/1M + 800 * 3/1M * 0.10 = 0.0006 + 0.00024 = 0.00084
+        cost = _estimate_cost_from_tokens(
+            "anthropic/claude-sonnet-4",
+            prompt_tokens=1000,
+            completion_tokens=0,
+            cache_read_tokens=800,
+        )
+        assert cost == pytest.approx(0.00084)
+
+    def test_cache_read_tokens_discounted_openai(self):
+        """Cache-read tokens billed at 50 % of input rate for OpenAI models."""
+        # 200 regular + 800 cache-read, 0 completion
+        # cost = 200 * 2.5/1M + 800 * 2.5/1M * 0.50 = 0.0005 + 0.001 = 0.0015
+        cost = _estimate_cost_from_tokens(
+            "openai/gpt-4o",
+            prompt_tokens=1000,
+            completion_tokens=0,
+            cache_read_tokens=800,
+        )
+        assert cost == pytest.approx(0.0015)
+
 
 class TestBaselineCostExtraction:
     """Tests for x-total-cost header extraction in _baseline_llm_caller."""
@@ -1022,10 +1052,11 @@ class TestBaselineCostExtraction:
         mock_client = MagicMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=[
-                make_stream(1000, 200),  # turn 1
-                make_stream(
-                    1100, 300
-                ),  # turn 2 (accumulators now hold 1000+1100, 200+300)
+                make_stream(1000, 200),  # turn 1: 1000 prompt, 200 completion
+                # turn 2: real streaming sends totals-per-call in the final usage
+                # chunk; each mock stream has a single chunk, so the value here
+                # represents the total for this API call (not a cumulative delta).
+                make_stream(1100, 300),  # turn 2: 1100 prompt, 300 completion
             ]
         )
 

@@ -106,6 +106,7 @@ _VISION_MIME_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/w
 # Used only when the ``x-total-cost`` response header is missing.
 # Rates sourced from OpenRouter's pricing page (input / output per 1M tokens).
 _OPENROUTER_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "anthropic/claude-opus-4.6": (15.0 / 1_000_000, 75.0 / 1_000_000),
     "anthropic/claude-sonnet-4": (3.0 / 1_000_000, 15.0 / 1_000_000),
     "anthropic/claude-3.5-sonnet": (3.0 / 1_000_000, 15.0 / 1_000_000),
     "anthropic/claude-3-haiku": (0.25 / 1_000_000, 1.25 / 1_000_000),
@@ -117,13 +118,31 @@ _OPENROUTER_MODEL_PRICING: dict[str, tuple[float, float]] = {
     "google/gemini-2.5-pro-preview": (1.25 / 1_000_000, 10.0 / 1_000_000),
 }
 
+# Cache-read discount fractions per provider prefix (relative to input rate).
+# Anthropic: 10%, OpenAI: 50%, Google: not billed separately so 100% (no discount).
+_CACHE_READ_DISCOUNT: dict[str, float] = {
+    "anthropic/": 0.10,
+    "openai/": 0.50,
+}
+
 
 def _estimate_cost_from_tokens(
     model: str,
     prompt_tokens: int,
     completion_tokens: int,
+    cache_read_tokens: int = 0,
 ) -> float | None:
     """Estimate USD cost from token counts using known model pricing.
+
+    ``prompt_tokens`` should be the *total* prompt token count as reported by
+    the API (includes both regular and cache-read tokens as a subset).
+    ``cache_read_tokens`` is used to apply a provider-specific discount:
+
+    * Cache reads are billed at a fraction of the normal input rate
+      (Anthropic: 10 %, OpenAI: 50 %).  The regular (non-cached) portion is
+      billed at full price.
+    * Cache writes (creation) are already included in ``prompt_tokens`` at the
+      full input rate — no adjustment is needed.
 
     Returns None if the model is not in the pricing table.
     """
@@ -131,7 +150,22 @@ def _estimate_cost_from_tokens(
     if pricing is None:
         return None
     input_rate, output_rate = pricing
-    return prompt_tokens * input_rate + completion_tokens * output_rate
+
+    # Determine the cache-read discount fraction for this provider.
+    cache_read_fraction = next(
+        (v for prefix, v in _CACHE_READ_DISCOUNT.items() if model.startswith(prefix)),
+        1.0,  # no discount for unknown providers
+    )
+
+    # Regular (non-cached) input tokens billed at full price;
+    # cache-read tokens billed at the discounted rate.
+    regular_prompt = max(0, prompt_tokens - cache_read_tokens)
+    cost = (
+        regular_prompt * input_rate
+        + cache_read_tokens * input_rate * cache_read_fraction
+        + completion_tokens * output_rate
+    )
+    return cost
 
 
 # Max size for embedding images directly in the user message (20 MiB raw).
@@ -399,6 +433,7 @@ async def _baseline_llm_caller(
     # block can always reference them even when the API call raises.
     prompt_tokens_before = state.turn_prompt_tokens
     completion_tokens_before = state.turn_completion_tokens
+    cache_read_tokens_before = state.turn_cache_read_tokens
     try:
         client = _get_openai_client()
         typed_messages = cast(list[ChatCompletionMessageParam], messages)
@@ -508,8 +543,11 @@ async def _baseline_llm_caller(
         # Use the delta for this call only — the state accumulators grow across
         # all tool-call turns, so passing the cumulative total would
         # compound-overestimate costs on the 2nd+ turn.
+        # Separate out cached reads so we can apply provider-specific discounts
+        # (Anthropic: 10 %, OpenAI: 50 %) instead of billing them at full price.
         call_prompt_tokens = state.turn_prompt_tokens - prompt_tokens_before
         call_completion_tokens = state.turn_completion_tokens - completion_tokens_before
+        call_cache_read_tokens = state.turn_cache_read_tokens - cache_read_tokens_before
         if not got_header_cost and (
             call_prompt_tokens > 0 or call_completion_tokens > 0
         ):
@@ -517,6 +555,7 @@ async def _baseline_llm_caller(
                 state.model,
                 call_prompt_tokens,
                 call_completion_tokens,
+                cache_read_tokens=call_cache_read_tokens,
             )
             if estimated is not None:
                 state.cost_usd = (state.cost_usd or 0.0) + estimated
@@ -1367,6 +1406,22 @@ async def stream_chat_completion_baseline(
                 state.turn_prompt_tokens,
                 state.turn_completion_tokens,
             )
+            # Attempt a cost estimate from the tiktoken-derived counts so that
+            # persist_and_record_usage never receives cost_usd=None after this
+            # fallback fires.  Only fill in if no cost was already recorded.
+            if state.cost_usd is None:
+                tiktoken_estimated = _estimate_cost_from_tokens(
+                    active_model,
+                    state.turn_prompt_tokens,
+                    state.turn_completion_tokens,
+                )
+                if tiktoken_estimated is not None:
+                    state.cost_usd = tiktoken_estimated
+                    logger.info(
+                        "[Baseline] Estimated cost from tiktoken counts: $%.6f (model=%s)",
+                        tiktoken_estimated,
+                        active_model,
+                    )
 
         # Persist token usage to session and record for rate limiting.
         # When prompt_tokens_details.cached_tokens is reported, subtract
