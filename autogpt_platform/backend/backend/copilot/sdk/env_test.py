@@ -45,6 +45,7 @@ class TestBuildSdkEnvSubscription:
         assert result["ANTHROPIC_AUTH_TOKEN"] == ""
         assert result["ANTHROPIC_BASE_URL"] == ""
         assert result.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS") == "1"
+        assert result.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "50"
         mock_validate.assert_called_once()
 
     @patch(
@@ -80,6 +81,7 @@ class TestBuildSdkEnvDirectAnthropic:
         assert "ANTHROPIC_AUTH_TOKEN" not in result
         assert "ANTHROPIC_BASE_URL" not in result
         assert result.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS") == "1"
+        assert result.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "50"
 
     def test_no_anthropic_key_overrides_when_openrouter_flag_true_but_no_key(self):
         """OpenRouter flag is True but no api_key => openrouter_active is False."""
@@ -96,6 +98,7 @@ class TestBuildSdkEnvDirectAnthropic:
         assert "ANTHROPIC_AUTH_TOKEN" not in result
         assert "ANTHROPIC_BASE_URL" not in result
         assert result.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS") == "1"
+        assert result.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "50"
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +133,7 @@ class TestBuildSdkEnvOpenRouter:
         assert "Accept-Encoding: identity" in result["ANTHROPIC_CUSTOM_HEADERS"]
         # OpenRouter compat: env var must always be present
         assert result.get("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS") == "1"
+        assert result.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE") == "50"
 
     def test_strips_trailing_v1(self):
         """The /v1 suffix is stripped from the base URL."""

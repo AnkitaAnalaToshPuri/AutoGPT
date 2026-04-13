@@ -191,10 +191,6 @@ class CoPilotProcessor:
         """
         try:
             if not cli_path:
-                cli_path = os.getenv("CLAUDE_AGENT_CLI_PATH") or os.getenv(
-                    "CHAT_CLAUDE_AGENT_CLI_PATH"
-                )
-            if not cli_path:
                 from claude_agent_sdk._internal.transport.subprocess_cli import (
                     SubprocessCLITransport,
                 )
