@@ -275,6 +275,42 @@ async def get_platform_cost_dashboard(
         "trackingAmount": True,
     }
 
+    # Build parameterised WHERE clause for the raw SQL percentile/bucket
+    # queries so they honour all active dashboard filters, not just start date.
+    raw_params: list = [start]
+    raw_where_clauses = [
+        '"trackingType" = \'cost_usd\'',
+        '"createdAt" >= $1',
+    ]
+    param_idx = 2  # $1 is already start
+
+    if end is not None:
+        raw_where_clauses.append(f'"createdAt" <= ${param_idx}')
+        raw_params.append(end)
+        param_idx += 1
+
+    if provider is not None:
+        raw_where_clauses.append(f'"provider" = ${param_idx}')
+        raw_params.append(provider.lower())
+        param_idx += 1
+
+    if user_id is not None:
+        raw_where_clauses.append(f'"userId" = ${param_idx}')
+        raw_params.append(user_id)
+        param_idx += 1
+
+    if model is not None:
+        raw_where_clauses.append(f'"model" = ${param_idx}')
+        raw_params.append(model)
+        param_idx += 1
+
+    if block_name is not None:
+        raw_where_clauses.append(f'LOWER("blockName") = LOWER(${param_idx})')
+        raw_params.append(block_name)
+        param_idx += 1
+
+    raw_where = " AND ".join(raw_where_clauses)
+
     # Run all six aggregation queries in parallel.
     (
         by_provider_groups,
@@ -317,7 +353,7 @@ async def get_platform_cost_dashboard(
             },
             count=True,
         ),
-        # Percentile distribution of cost per request.
+        # Percentile distribution of cost per request (respects all filters).
         query_raw_with_schema(
             "SELECT"
             "  percentile_cont(0.5) WITHIN GROUP"
@@ -329,11 +365,10 @@ async def get_platform_cost_dashboard(
             "  percentile_cont(0.99) WITHIN GROUP"
             '    (ORDER BY "costMicrodollars") as p99'
             ' FROM {schema_prefix}"PlatformCostLog"'
-            " WHERE \"trackingType\" = 'cost_usd'"
-            ' AND "createdAt" >= $1',
-            start,
+            f" WHERE {raw_where}",
+            *raw_params,
         ),
-        # Histogram buckets for cost distribution.
+        # Histogram buckets for cost distribution (respects all filters).
         query_raw_with_schema(
             "SELECT"
             "  CASE"
@@ -351,11 +386,10 @@ async def get_platform_cost_dashboard(
             "  END as bucket,"
             "  COUNT(*) as count"
             ' FROM {schema_prefix}"PlatformCostLog"'
-            " WHERE \"trackingType\" = 'cost_usd'"
-            ' AND "createdAt" >= $1'
+            f" WHERE {raw_where}"
             " GROUP BY bucket"
             ' ORDER BY MIN("costMicrodollars")',
-            start,
+            *raw_params,
         ),
     )
 

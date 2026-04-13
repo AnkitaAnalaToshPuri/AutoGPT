@@ -416,6 +416,7 @@ class TestGetPlatformCostDashboard:
         mock_actions.group_by = AsyncMock(side_effect=[[], [], [], []])
         mock_actions.find_many = AsyncMock(return_value=[])
 
+        raw_mock = AsyncMock(side_effect=[[], []])
         with (
             patch(
                 "backend.data.platform_cost.PrismaLog.prisma",
@@ -427,8 +428,7 @@ class TestGetPlatformCostDashboard:
             ),
             patch(
                 "backend.data.platform_cost.query_raw_with_schema",
-                new_callable=AsyncMock,
-                side_effect=[[], []],
+                raw_mock,
             ),
         ):
             await get_platform_cost_dashboard(
@@ -440,6 +440,12 @@ class TestGetPlatformCostDashboard:
         # The where dict passed to the first call should include createdAt
         first_call_kwargs = mock_actions.group_by.call_args_list[0][1]
         assert "createdAt" in first_call_kwargs.get("where", {})
+        # Raw SQL queries should receive provider and user_id as parameters
+        assert raw_mock.await_count == 2
+        raw_call_args = raw_mock.call_args_list[0][0]  # positional args of 1st call
+        raw_params = raw_call_args[1:]  # first arg is the query template
+        assert "openai" in raw_params
+        assert "u1" in raw_params
 
 
 def _make_prisma_log_row(
