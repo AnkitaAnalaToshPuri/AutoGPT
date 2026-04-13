@@ -180,12 +180,13 @@ class ChatConfig(BaseSettings):
         "capping this is the single biggest cost lever. "
         "8192 is sufficient for most tasks; increase for complex reasoning.",
     )
-    claude_agent_thinking_effort: str = Field(
-        default="low",
-        description="Thinking effort level: 'low', 'medium', 'high', or 'max'. "
-        "Controls how much reasoning the model does per call. "
-        "'low' minimizes thinking token usage (biggest cost lever). "
-        "Override via CHAT_CLAUDE_AGENT_THINKING_EFFORT env var.",
+    claude_agent_thinking_effort: str | None = Field(
+        default=None,
+        description="Thinking effort level: 'low', 'medium', 'high', 'max', or None. "
+        "Only applies to models with extended thinking (Opus). "
+        "Sonnet doesn't have extended thinking — setting effort on Sonnet "
+        "can cause <internal_reasoning> tag leaks. "
+        "None = let the model decide. Override via CHAT_CLAUDE_AGENT_THINKING_EFFORT.",
     )
     claude_agent_max_transient_retries: int = Field(
         default=3,
