@@ -388,21 +388,17 @@ class RunAgentTool(BaseTool):
         # not hidden from the user — they would surface on the next run attempt
         # after the credential fix, creating a confusing two-step failure.
         #
-        # Use ``any()`` for the emptiness check and a generator inside
-        # ``all()`` so we can short-circuit without materializing the full
-        # message list.
-        has_messages = any(
-            True
-            for _ in (
-                msg
-                for node_errors in error.node_errors.values()
-                for msg in node_errors.values()
-            )
-        )
-        if not has_messages or not all(
-            is_credential_validation_error_message(msg)
+        # Collect all error messages once so we can check both emptiness and
+        # uniformity without iterating twice.  all() returns True vacuously on
+        # an empty sequence, so the ``not messages`` guard is essential — an
+        # empty node_errors dict must fall through to the plain error path.
+        messages = [
+            msg
             for node_errors in error.node_errors.values()
             for msg in node_errors.values()
+        ]
+        if not messages or not all(
+            is_credential_validation_error_message(msg) for msg in messages
         ):
             return None
 

@@ -658,6 +658,12 @@ def get_service_client(
                     # attribute that ``exc.args`` alone doesn't preserve.
                     # If the server included it in ``extras``, thread it
                     # back into the reconstructed exception.
+                    #
+                    # Identity check (``is``) is deliberate here — unlike the
+                    # DataError path above which uses ``issubclass`` to catch
+                    # all subclasses, GraphValidationError subclasses should
+                    # fall through to the generic ``raise exception_class(*args)``
+                    # below rather than silently losing their custom attributes.
                     if exception_class is exceptions.GraphValidationError:
                         msg = str(args[0]) if args else str(e)
                         node_errors = (
