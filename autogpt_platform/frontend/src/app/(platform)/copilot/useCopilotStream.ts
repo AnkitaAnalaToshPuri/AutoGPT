@@ -17,6 +17,7 @@ import {
   hasActiveBackendStream,
   resolveInProgressTools,
   getSendSuppressionReason,
+  disconnectSessionStream,
 } from "./helpers";
 import type { CopilotMode } from "./store";
 
@@ -147,7 +148,7 @@ export function useCopilotStream({
     reconnectTimerRef.current = setTimeout(() => {
       isReconnectScheduledRef.current = false;
       setIsReconnectScheduled(false);
-      resumeStream();
+      resumeStreamRef.current();
     }, delay);
   }
 
@@ -244,6 +245,14 @@ export function useCopilotStream({
       }
     },
   });
+
+  // Keep stable refs to sdkStop and resumeStream so that async callbacks
+  // (session-switch cleanup, wake re-sync, reconnect timer) always call the
+  // latest version without stale-closure bugs.
+  const sdkStopRef = useRef(sdkStop);
+  sdkStopRef.current = sdkStop;
+  const resumeStreamRef = useRef(resumeStream);
+  resumeStreamRef.current = resumeStream;
 
   // Wrap sdkSendMessage to guard against re-sending the user message during a
   // reconnect cycle. If the session already has the message (i.e. we are in a
@@ -371,7 +380,7 @@ export function useCopilotStream({
             }
             return prev;
           });
-          await resumeStream();
+          await resumeStreamRef.current();
         }
         // If !backendActive, the refetch will update hydratedMessages via
         // React Query, and the hydration effect below will merge them in.
@@ -394,7 +403,7 @@ export function useCopilotStream({
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refetchSession, setMessages, resumeStream]);
+  }, [refetchSession, setMessages]);
 
   // Hydrate messages from REST API when not actively streaming
   useEffect(() => {
@@ -410,8 +419,19 @@ export function useCopilotStream({
   // Track resume state per session
   const hasResumedRef = useRef<Map<string, boolean>>(new Map());
 
-  // Clean up reconnect state on session switch
+  // Clean up reconnect state on session switch.
+  // Abort the old stream's in-flight fetch and tell the backend to release
+  // its XREAD listeners immediately (fire-and-forget).
+  const prevStreamSessionRef = useRef(sessionId);
   useEffect(() => {
+    const prevSid = prevStreamSessionRef.current;
+    prevStreamSessionRef.current = sessionId;
+
+    if (prevSid && prevSid !== sessionId) {
+      sdkStopRef.current();
+      disconnectSessionStream(prevSid);
+    }
+
     clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = undefined;
     reconnectAttemptsRef.current = 0;
@@ -486,15 +506,8 @@ export function useCopilotStream({
       return prev;
     });
 
-    resumeStream();
-  }, [
-    sessionId,
-    hasActiveStream,
-    hydratedMessages,
-    status,
-    resumeStream,
-    setMessages,
-  ]);
+    resumeStreamRef.current();
+  }, [sessionId, hasActiveStream, hydratedMessages, status, setMessages]);
 
   // Clear messages when session is null
   useEffect(() => {

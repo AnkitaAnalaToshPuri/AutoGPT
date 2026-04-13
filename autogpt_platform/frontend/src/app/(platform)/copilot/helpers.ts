@@ -2,6 +2,8 @@ import { getSystemHeaders } from "@/lib/impersonation";
 import { getWebSocketToken } from "@/lib/supabase/actions";
 import type { UIMessage } from "ai";
 
+import { environment } from "@/services/environment";
+
 export const ORIGINAL_TITLE = "AutoGPT";
 
 /**
@@ -151,6 +153,24 @@ export function shouldSuppressDuplicateSend(
   args: SuppressDuplicateArgs,
 ): boolean {
   return getSendSuppressionReason(args) !== null;
+}
+
+/**
+ * Fire-and-forget: tell the backend to release XREAD listeners for a session.
+ *
+ * Called on session switch so the backend doesn't wait for its 5-10 s timeout
+ * before cleaning up. Failures are silently ignored — the backend will
+ * eventually clean up on its own.
+ */
+export function disconnectSessionStream(sessionId: string): void {
+  getCopilotAuthHeaders()
+    .then((headers) =>
+      fetch(
+        `${environment.getAGPTServerBaseUrl()}/api/chat/sessions/${sessionId}/stream`,
+        { method: "DELETE", headers },
+      ),
+    )
+    .catch(() => {});
 }
 
 /**

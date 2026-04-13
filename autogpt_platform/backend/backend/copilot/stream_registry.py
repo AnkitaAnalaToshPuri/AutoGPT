@@ -1149,3 +1149,37 @@ async def unsubscribe_from_session(
         )
 
     logger.debug(f"Successfully unsubscribed from session {session_id}")
+
+
+async def disconnect_all_listeners(session_id: str) -> int:
+    """Cancel every active listener task for *session_id*.
+
+    Called when the frontend switches away from a session and wants the
+    backend to release resources immediately rather than waiting for the
+    XREAD timeout.
+
+    Returns the number of listener tasks that were cancelled.
+    """
+    to_cancel: list[tuple[int, asyncio.Task]] = [
+        (qid, task)
+        for qid, (sid, task) in list(_listener_sessions.items())
+        if sid == session_id and not task.done()
+    ]
+
+    for qid, task in to_cancel:
+        _listener_sessions.pop(qid, None)
+        task.cancel()
+
+    cancelled = 0
+    for _qid, task in to_cancel:
+        try:
+            await asyncio.wait_for(task, timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        except Exception as e:
+            logger.error(f"Error cancelling listener for session {session_id}: {e}")
+        cancelled += 1
+
+    if cancelled:
+        logger.info(f"Disconnected {cancelled} listener(s) for session {session_id}")
+    return cancelled
