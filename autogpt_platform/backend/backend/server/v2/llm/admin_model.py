@@ -1,115 +1,145 @@
 """Request/response models for LLM registry admin API."""
 
+from __future__ import annotations
+
 from typing import Any
 
-from pydantic import BaseModel, Field
+import pydantic
 
 
-class CreateLlmProviderRequest(BaseModel):
-    """Request model for creating an LLM provider."""
-
-    name: str = Field(
-        ..., description="Provider identifier (e.g., 'openai', 'anthropic')"
-    )
-    display_name: str = Field(..., description="Human-readable provider name")
-    description: str | None = Field(None, description="Provider description")
-    default_credential_provider: str | None = Field(
-        None, description="Default credential system identifier"
-    )
-    default_credential_id: str | None = Field(None, description="Default credential ID")
-    default_credential_type: str | None = Field(
-        None, description="Default credential type"
-    )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
+class CreateLlmProviderRequest(pydantic.BaseModel):
+    name: str
+    display_name: str
+    description: str | None = None
+    default_credential_provider: str | None = None
+    default_credential_id: str | None = None
+    default_credential_type: str | None = None
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
 
 
-class UpdateLlmProviderRequest(BaseModel):
-    """Request model for updating an LLM provider."""
-
-    display_name: str | None = Field(None, description="Human-readable provider name")
-    description: str | None = Field(None, description="Provider description")
-    default_credential_provider: str | None = Field(
-        None, description="Default credential system identifier"
-    )
-    default_credential_id: str | None = Field(None, description="Default credential ID")
-    default_credential_type: str | None = Field(
-        None, description="Default credential type"
-    )
-    metadata: dict[str, Any] | None = Field(None, description="Additional metadata")
+class UpdateLlmProviderRequest(pydantic.BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    default_credential_provider: str | None = None
+    default_credential_id: str | None = None
+    default_credential_type: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
-class CreateLlmModelRequest(BaseModel):
-    """Request model for creating an LLM model."""
-
-    slug: str = Field(..., description="Model slug (e.g., 'gpt-4', 'claude-3-opus')")
-    display_name: str = Field(..., description="Human-readable model name")
-    description: str | None = Field(None, description="Model description")
-    provider_id: str = Field(..., description="Provider ID (UUID)")
-    creator_id: str | None = Field(None, description="Creator ID (UUID)")
-    context_window: int = Field(
-        ..., description="Maximum context window in tokens", gt=0
-    )
-    max_output_tokens: int | None = Field(
-        None, description="Maximum output tokens (None if unlimited)", gt=0
-    )
-    price_tier: int = Field(
-        ..., description="Price tier (1=cheapest, 2=medium, 3=expensive)", ge=1, le=3
-    )
-    is_enabled: bool = Field(default=True, description="Whether the model is enabled")
-    is_recommended: bool = Field(
-        default=False, description="Whether the model is recommended"
-    )
-    supports_tools: bool = Field(default=False, description="Supports function calling")
-    supports_json_output: bool = Field(
-        default=False, description="Supports JSON output mode"
-    )
-    supports_reasoning: bool = Field(
-        default=False, description="Supports reasoning mode"
-    )
-    supports_parallel_tool_calls: bool = Field(
-        default=False, description="Supports parallel tool calls"
-    )
-    capabilities: dict[str, Any] = Field(
-        default_factory=dict, description="Additional capabilities"
-    )
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
-    costs: list[dict[str, Any]] = Field(
-        default_factory=list, description="Cost entries for the model"
-    )
+class CreateLlmModelRequest(pydantic.BaseModel):
+    slug: str
+    display_name: str
+    description: str | None = None
+    provider_name: str
+    creator_id: str | None = None
+    context_window: int = pydantic.Field(gt=0)
+    max_output_tokens: int | None = pydantic.Field(default=None, gt=0)
+    price_tier: int = pydantic.Field(ge=1, le=3)
+    is_enabled: bool = True
+    is_recommended: bool = False
+    supports_tools: bool = False
+    supports_json_output: bool = False
+    supports_reasoning: bool = False
+    supports_parallel_tool_calls: bool = False
+    capabilities: dict[str, Any] = pydantic.Field(default_factory=dict)
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+    costs: list[dict[str, Any]] = pydantic.Field(default_factory=list)
 
 
-class UpdateLlmModelRequest(BaseModel):
-    """Request model for updating an LLM model."""
+class UpdateLlmModelRequest(pydantic.BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    creator_id: str | None = None
+    context_window: int | None = pydantic.Field(default=None, gt=0)
+    max_output_tokens: int | None = pydantic.Field(default=None, gt=0)
+    price_tier: int | None = pydantic.Field(default=None, ge=1, le=3)
+    is_enabled: bool | None = None
+    is_recommended: bool | None = None
+    supports_tools: bool | None = None
+    supports_json_output: bool | None = None
+    supports_reasoning: bool | None = None
+    supports_parallel_tool_calls: bool | None = None
+    capabilities: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
 
-    display_name: str | None = Field(None, description="Human-readable model name")
-    description: str | None = Field(None, description="Model description")
-    creator_id: str | None = Field(None, description="Creator ID (UUID)")
-    context_window: int | None = Field(
-        None, description="Maximum context window in tokens", gt=0
-    )
-    max_output_tokens: int | None = Field(
-        None, description="Maximum output tokens (None if unlimited)", gt=0
-    )
-    price_tier: int | None = Field(
-        None, description="Price tier (1=cheapest, 2=medium, 3=expensive)", ge=1, le=3
-    )
-    is_enabled: bool | None = Field(None, description="Whether the model is enabled")
-    is_recommended: bool | None = Field(
-        None, description="Whether the model is recommended"
-    )
-    supports_tools: bool | None = Field(None, description="Supports function calling")
-    supports_json_output: bool | None = Field(
-        None, description="Supports JSON output mode"
-    )
-    supports_reasoning: bool | None = Field(None, description="Supports reasoning mode")
-    supports_parallel_tool_calls: bool | None = Field(
-        None, description="Supports parallel tool calls"
-    )
-    capabilities: dict[str, Any] | None = Field(
-        None, description="Additional capabilities"
-    )
-    metadata: dict[str, Any] | None = Field(None, description="Additional metadata")
+
+class ToggleLlmModelRequest(pydantic.BaseModel):
+    is_enabled: bool
+    migrate_to_slug: str | None = None
+    migration_reason: str | None = None
+    custom_credit_cost: int | None = None
+
+
+class CreateLlmCreatorRequest(pydantic.BaseModel):
+    name: str
+    display_name: str
+    description: str | None = None
+    website_url: str | None = None
+    logo_url: str | None = None
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+
+
+class UpdateLlmCreatorRequest(pydantic.BaseModel):
+    display_name: str | None = None
+    description: str | None = None
+    website_url: str | None = None
+    logo_url: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class LlmCreatorAdminResponse(pydantic.BaseModel):
+    id: str
+    name: str
+    display_name: str
+    description: str | None = None
+    website_url: str | None = None
+    logo_url: str | None = None
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class LlmModelCostAdminResponse(pydantic.BaseModel):
+    unit: str
+    credit_cost: float
+    credential_provider: str
+    credential_type: str | None = None
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+
+
+class LlmProviderAdminResponse(pydantic.BaseModel):
+    id: str
+    name: str
+    display_name: str
+    description: str | None = None
+    default_credential_provider: str | None = None
+    default_credential_id: str | None = None
+    default_credential_type: str | None = None
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    model_count: int | None = None
+
+
+class LlmModelAdminResponse(pydantic.BaseModel):
+    id: str
+    slug: str
+    display_name: str
+    description: str | None = None
+    provider_id: str
+    creator_id: str | None = None
+    context_window: int
+    max_output_tokens: int | None = None
+    price_tier: int
+    is_enabled: bool
+    is_recommended: bool
+    supports_tools: bool
+    supports_json_output: bool
+    supports_reasoning: bool
+    supports_parallel_tool_calls: bool
+    capabilities: dict[str, Any] = pydantic.Field(default_factory=dict)
+    metadata: dict[str, Any] = pydantic.Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    creator: LlmCreatorAdminResponse | None = None
+    costs: list[LlmModelCostAdminResponse] = pydantic.Field(default_factory=list)
