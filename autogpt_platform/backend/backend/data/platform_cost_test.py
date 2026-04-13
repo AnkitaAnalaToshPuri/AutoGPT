@@ -286,6 +286,7 @@ class TestGetPlatformCostDashboard:
             side_effect=[
                 [provider_row],  # by_provider
                 [user_row],  # by_user
+                [],  # by_user_tracking_groups (no cost_usd rows for this user)
                 [{"userId": "u1"}],  # distinct users
                 [provider_row],  # total agg
             ]
@@ -322,7 +323,9 @@ class TestGetPlatformCostDashboard:
         assert len(dashboard.by_user) == 1
         assert dashboard.by_user[0].email == "a***@b.com"
         assert dashboard.cost_p50_microdollars == 1000
+        assert dashboard.cost_p75_microdollars == 2000
         assert dashboard.cost_p95_microdollars == 4000
+        assert dashboard.cost_p99_microdollars == 5000
         assert len(dashboard.cost_buckets) == 1
         # Token averages must use token_bearing_requests (3) not cost_bearing (0)
         assert dashboard.avg_input_tokens_per_request == pytest.approx(1000 / 3)
@@ -351,6 +354,7 @@ class TestGetPlatformCostDashboard:
             side_effect=[
                 [provider_row],  # by_provider
                 [user_row],  # by_user
+                [],  # by_user_tracking_groups
                 [{"userId": "u2"}],  # distinct users
                 [provider_row],  # total agg
             ]
@@ -385,7 +389,7 @@ class TestGetPlatformCostDashboard:
     @pytest.mark.asyncio
     async def test_returns_empty_dashboard(self):
         mock_actions = MagicMock()
-        mock_actions.group_by = AsyncMock(side_effect=[[], [], [], []])
+        mock_actions.group_by = AsyncMock(side_effect=[[], [], [], [], []])
         mock_actions.find_many = AsyncMock(return_value=[])
 
         with (
@@ -418,7 +422,7 @@ class TestGetPlatformCostDashboard:
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
         mock_actions = MagicMock()
-        mock_actions.group_by = AsyncMock(side_effect=[[], [], [], []])
+        mock_actions.group_by = AsyncMock(side_effect=[[], [], [], [], []])
         mock_actions.find_many = AsyncMock(return_value=[])
 
         raw_mock = AsyncMock(side_effect=[[], []])
@@ -440,8 +444,8 @@ class TestGetPlatformCostDashboard:
                 start=start, provider="openai", user_id="u1"
             )
 
-        # group_by called 4 times (by_provider, by_user, distinct users, totals)
-        assert mock_actions.group_by.await_count == 4
+        # group_by called 5 times (by_provider, by_user, by_user_tracking, distinct users, totals)
+        assert mock_actions.group_by.await_count == 5
         # The where dict passed to the first call should include createdAt
         first_call_kwargs = mock_actions.group_by.call_args_list[0][1]
         assert "createdAt" in first_call_kwargs.get("where", {})

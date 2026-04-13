@@ -58,9 +58,11 @@ function UserTable({ data }: Props) {
                 {formatTokens(row.total_output_tokens)}
               </td>
               <td className="px-4 py-3 text-right">
-                {row.request_count > 0 && row.total_cost_microdollars > 0
+                {(row.cost_bearing_request_count ?? 0) > 0 &&
+                row.total_cost_microdollars > 0
                   ? formatMicrodollars(
-                      row.total_cost_microdollars / row.request_count,
+                      row.total_cost_microdollars /
+                        row.cost_bearing_request_count!,
                     )
                   : "-"}
               </td>

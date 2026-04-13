@@ -3,12 +3,11 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from typing_extensions import TypedDict
-
 from prisma.models import PlatformCostLog as PrismaLog
 from prisma.models import User as PrismaUser
 from prisma.types import PlatformCostLogCreateInput, PlatformCostLogWhereInput
 from pydantic import BaseModel
+from typing_extensions import TypedDict
 
 from backend.data.db import query_raw_with_schema
 from backend.util.cache import cached
@@ -143,6 +142,7 @@ class UserCostSummary(BaseModel):
     total_input_tokens: int
     total_output_tokens: int
     request_count: int
+    cost_bearing_request_count: int = 0
 
 
 class CostLogRow(BaseModel):
@@ -286,7 +286,7 @@ async def get_platform_cost_dashboard(
     # queries so they honour all active dashboard filters, not just start date.
     raw_params: list = [start]
     raw_where_clauses = [
-        '"trackingType" = \'cost_usd\'',
+        "\"trackingType\" = 'cost_usd'",
         '"createdAt" >= $1',
     ]
     param_idx = 2  # $1 is already start
@@ -316,12 +316,20 @@ async def get_platform_cost_dashboard(
         raw_params.append(block_name)
         param_idx += 1
 
+    # If the caller supplied a specific tracking_type filter, replace the
+    # hardcoded cost_usd clause so the percentile/bucket queries respect it.
+    if tracking_type is not None:
+        raw_where_clauses[0] = f'"trackingType" = ${param_idx}'
+        raw_params.append(tracking_type)
+        param_idx += 1
+
     raw_where = " AND ".join(raw_where_clauses)
 
-    # Run all six aggregation queries in parallel.
+    # Run all seven aggregation queries in parallel.
     (
         by_provider_groups,
         by_user_groups,
+        by_user_tracking_groups,
         total_user_groups,
         total_agg_groups,
         percentile_rows,
@@ -340,6 +348,13 @@ async def get_platform_cost_dashboard(
             by=["userId"],
             where=where,
             sum=sum_fields,
+            count=True,
+        ),
+        # Per-user cost-bearing request count: group by (userId, trackingType)
+        # so we can compute the correct denominator for per-user avg cost.
+        PrismaLog.prisma().group_by(
+            by=["userId", "trackingType"],
+            where=where,
             count=True,
         ),
         # Distinct user count: group by userId, count groups.
@@ -376,6 +391,8 @@ async def get_platform_cost_dashboard(
             *raw_params,
         ),
         # Histogram buckets for cost distribution (respects all filters).
+        # NULL costMicrodollars is excluded explicitly to prevent such rows
+        # from falling through all WHEN clauses into the ELSE '$10+' bucket.
         query_raw_with_schema(
             "SELECT"
             "  CASE"
@@ -393,7 +410,7 @@ async def get_platform_cost_dashboard(
             "  END as bucket,"
             "  COUNT(*) as count"
             ' FROM {schema_prefix}"PlatformCostLog"'
-            f" WHERE {raw_where}"
+            f' WHERE {raw_where} AND "costMicrodollars" IS NOT NULL'
             " GROUP BY bucket"
             ' ORDER BY MIN("costMicrodollars")',
             *raw_params,
@@ -448,6 +465,16 @@ async def get_platform_cost_dashboard(
         _ca(r) for r in total_agg_groups if r.get("trackingType") == "tokens"
     )
 
+    # Per-user cost-bearing request count: used for per-user avg cost so the
+    # denominator matches the numerator (cost_usd rows only, per user).
+    user_cost_bearing_counts: dict[str, int] = {}
+    for r in by_user_tracking_groups:
+        if r.get("trackingType") == "cost_usd" and r.get("userId"):
+            uid = r["userId"]
+            user_cost_bearing_counts[uid] = user_cost_bearing_counts.get(uid, 0) + _ca(
+                r
+            )
+
     return PlatformCostDashboard(
         by_provider=[
             ProviderCostSummary(
@@ -473,6 +500,9 @@ async def get_platform_cost_dashboard(
                 total_input_tokens=_si(r, "inputTokens"),
                 total_output_tokens=_si(r, "outputTokens"),
                 request_count=_ca(r),
+                cost_bearing_request_count=user_cost_bearing_counts.get(
+                    r.get("userId") or "", 0
+                ),
             )
             for r in by_user_groups
         ],

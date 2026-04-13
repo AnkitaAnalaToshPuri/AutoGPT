@@ -15585,7 +15585,8 @@
             "type": "integer",
             "title": "Total Output Tokens"
           },
-          "request_count": { "type": "integer", "title": "Request Count" }
+          "request_count": { "type": "integer", "title": "Request Count" },
+          "cost_bearing_request_count": { "type": "integer", "title": "Cost Bearing Request Count", "default": 0 }
         },
         "type": "object",
         "required": [
