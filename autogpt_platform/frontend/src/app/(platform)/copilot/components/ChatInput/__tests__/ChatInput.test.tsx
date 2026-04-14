@@ -175,13 +175,11 @@ describe("ChatInput mode toggle", () => {
     expect(button.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("uses streaming-specific tooltip when disabled", () => {
+  it("disables the mode toggle button while streaming", () => {
     mockFlagValue = true;
     render(<ChatInput onSend={mockOnSend} isStreaming />);
     const button = screen.getByLabelText(/switch to fast mode/i);
-    expect(button.getAttribute("title")).toBe(
-      "Mode cannot be changed while streaming",
-    );
+    expect(button.hasAttribute("disabled")).toBe(true);
   });
 
   it("shows a toast when the user toggles mode", async () => {
