@@ -22,6 +22,8 @@ from autogpt_libs import auth
 from fastapi import APIRouter, HTTPException, Path, Security
 from prisma.models import PlatformLink, PlatformLinkToken, PlatformUserLink
 
+from backend.data.db import transaction
+
 from . import find_server_link, find_user_link
 from .auth import check_bot_api_key, get_bot_api_key
 from .models import (
@@ -81,35 +83,36 @@ async def create_link_token(
             detail="This server is already linked to an AutoGPT account.",
         )
 
-    # Invalidate any pending SERVER tokens for this server
-    await PlatformLinkToken.prisma().update_many(
-        where={
-            "platform": platform,
-            "linkType": LinkType.SERVER.value,
-            "platformServerId": request.platform_server_id,
-            "usedAt": None,
-        },
-        data={"usedAt": datetime.now(timezone.utc)},
-    )
-
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=LINK_TOKEN_EXPIRY_MINUTES
     )
 
-    await PlatformLinkToken.prisma().create(
-        data={
-            "token": token,
-            "platform": platform,
-            "linkType": LinkType.SERVER.value,
-            "platformServerId": request.platform_server_id,
-            "platformUserId": request.platform_user_id,
-            "platformUsername": request.platform_username,
-            "serverName": request.server_name,
-            "channelId": request.channel_id,
-            "expiresAt": expires_at,
-        }
-    )
+    # Atomically invalidate pending tokens and create new one to prevent TOCTOU races
+    async with transaction() as tx:
+        await PlatformLinkToken.prisma(tx).update_many(
+            where={
+                "platform": platform,
+                "linkType": LinkType.SERVER.value,
+                "platformServerId": request.platform_server_id,
+                "usedAt": None,
+            },
+            data={"usedAt": datetime.now(timezone.utc)},
+        )
+
+        await PlatformLinkToken.prisma(tx).create(
+            data={
+                "token": token,
+                "platform": platform,
+                "linkType": LinkType.SERVER.value,
+                "platformServerId": request.platform_server_id,
+                "platformUserId": request.platform_user_id,
+                "platformUsername": request.platform_username,
+                "serverName": request.server_name,
+                "channelId": request.channel_id,
+                "expiresAt": expires_at,
+            }
+        )
 
     logger.info(
         "Created SERVER link token for %s server %s (expires %s)",
@@ -146,32 +149,33 @@ async def create_user_link_token(
             detail="Your DMs with the bot are already linked to an AutoGPT account.",
         )
 
-    # Invalidate any pending USER tokens for this platform user
-    await PlatformLinkToken.prisma().update_many(
-        where={
-            "platform": platform,
-            "linkType": LinkType.USER.value,
-            "platformUserId": request.platform_user_id,
-            "usedAt": None,
-        },
-        data={"usedAt": datetime.now(timezone.utc)},
-    )
-
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=LINK_TOKEN_EXPIRY_MINUTES
     )
 
-    await PlatformLinkToken.prisma().create(
-        data={
-            "token": token,
-            "platform": platform,
-            "linkType": LinkType.USER.value,
-            "platformUserId": request.platform_user_id,
-            "platformUsername": request.platform_username,
-            "expiresAt": expires_at,
-        }
-    )
+    # Atomically invalidate pending tokens and create new one to prevent TOCTOU races
+    async with transaction() as tx:
+        await PlatformLinkToken.prisma(tx).update_many(
+            where={
+                "platform": platform,
+                "linkType": LinkType.USER.value,
+                "platformUserId": request.platform_user_id,
+                "usedAt": None,
+            },
+            data={"usedAt": datetime.now(timezone.utc)},
+        )
+
+        await PlatformLinkToken.prisma(tx).create(
+            data={
+                "token": token,
+                "platform": platform,
+                "linkType": LinkType.USER.value,
+                "platformUserId": request.platform_user_id,
+                "platformUsername": request.platform_username,
+                "expiresAt": expires_at,
+            }
+        )
 
     logger.info(
         "Created USER link token for %s (expires %s)",
@@ -296,7 +300,22 @@ async def confirm_link_token(
     user_id: Annotated[str, Security(auth.get_user_id)],
 ) -> ConfirmLinkResponse:
     """Frontend calls this after the user logs in and clicks 'Connect'."""
-    link_token = await _consume_token(token, expected_type=LinkType.SERVER)
+    link_token = await PlatformLinkToken.prisma().find_unique(where={"token": token})
+
+    if not link_token:
+        raise HTTPException(status_code=404, detail="Token not found.")
+
+    if link_token.linkType != LinkType.SERVER.value:
+        raise HTTPException(
+            status_code=400,
+            detail="This link is for a different linking flow.",
+        )
+
+    if link_token.usedAt is not None:
+        raise HTTPException(status_code=410, detail="This link has already been used.")
+
+    if link_token.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="This link has expired.")
 
     if not link_token.platformServerId:
         # Should be impossible given linkType=SERVER but satisfy the type system.
@@ -311,16 +330,30 @@ async def confirm_link_token(
         )
         raise HTTPException(status_code=409, detail=detail)
 
+    # Atomically consume token and create link to prevent token burning on create failures
+    now = datetime.now(timezone.utc)
     try:
-        await PlatformLink.prisma().create(
-            data={
-                "userId": user_id,
-                "platform": link_token.platform,
-                "platformServerId": link_token.platformServerId,
-                "ownerPlatformUserId": link_token.platformUserId,
-                "serverName": link_token.serverName,
-            }
-        )
+        async with transaction() as tx:
+            updated = await PlatformLinkToken.prisma(tx).update_many(
+                where={"token": token, "usedAt": None, "expiresAt": {"gt": now}},
+                data={"usedAt": now},
+            )
+            if updated == 0:
+                raise HTTPException(
+                    status_code=410, detail="This link has already been used."
+                )
+
+            await PlatformLink.prisma(tx).create(
+                data={
+                    "userId": user_id,
+                    "platform": link_token.platform,
+                    "platformServerId": link_token.platformServerId,
+                    "ownerPlatformUserId": link_token.platformUserId,
+                    "serverName": link_token.serverName,
+                }
+            )
+    except HTTPException:
+        raise
     except Exception as exc:
         if "unique" in str(exc).lower():
             raise HTTPException(
@@ -355,7 +388,22 @@ async def confirm_user_link_token(
     user_id: Annotated[str, Security(auth.get_user_id)],
 ) -> ConfirmUserLinkResponse:
     """Frontend calls this after the user logs in and clicks 'Connect' on a DM link."""
-    link_token = await _consume_token(token, expected_type=LinkType.USER)
+    link_token = await PlatformLinkToken.prisma().find_unique(where={"token": token})
+
+    if not link_token:
+        raise HTTPException(status_code=404, detail="Token not found.")
+
+    if link_token.linkType != LinkType.USER.value:
+        raise HTTPException(
+            status_code=400,
+            detail="This link is for a different linking flow.",
+        )
+
+    if link_token.usedAt is not None:
+        raise HTTPException(status_code=410, detail="This link has already been used.")
+
+    if link_token.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="This link has expired.")
 
     existing = await find_user_link(link_token.platform, link_token.platformUserId)
     if existing:
@@ -366,15 +414,29 @@ async def confirm_user_link_token(
         )
         raise HTTPException(status_code=409, detail=detail)
 
+    # Atomically consume token and create link to prevent token burning on create failures
+    now = datetime.now(timezone.utc)
     try:
-        await PlatformUserLink.prisma().create(
-            data={
-                "userId": user_id,
-                "platform": link_token.platform,
-                "platformUserId": link_token.platformUserId,
-                "platformUsername": link_token.platformUsername,
-            }
-        )
+        async with transaction() as tx:
+            updated = await PlatformLinkToken.prisma(tx).update_many(
+                where={"token": token, "usedAt": None, "expiresAt": {"gt": now}},
+                data={"usedAt": now},
+            )
+            if updated == 0:
+                raise HTTPException(
+                    status_code=410, detail="This link has already been used."
+                )
+
+            await PlatformUserLink.prisma(tx).create(
+                data={
+                    "userId": user_id,
+                    "platform": link_token.platform,
+                    "platformUserId": link_token.platformUserId,
+                    "platformUsername": link_token.platformUsername,
+                }
+            )
+    except HTTPException:
+        raise
     except Exception as exc:
         if "unique" in str(exc).lower():
             raise HTTPException(
@@ -496,40 +558,3 @@ async def delete_user_link(
         user_id[-8:],
     )
     return DeleteLinkResponse(success=True)
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────
-
-
-async def _consume_token(token: str, expected_type: LinkType) -> PlatformLinkToken:
-    """Fetch, validate, and atomically consume a link token.
-
-    Returns the token row. Raises HTTPException for any invalid state.
-    The caller is responsible for creating the corresponding link row.
-    """
-    link_token = await PlatformLinkToken.prisma().find_unique(where={"token": token})
-
-    if not link_token:
-        raise HTTPException(status_code=404, detail="Token not found.")
-
-    if link_token.linkType != expected_type.value:
-        raise HTTPException(
-            status_code=400,
-            detail="This link is for a different linking flow.",
-        )
-
-    if link_token.usedAt is not None:
-        raise HTTPException(status_code=410, detail="This link has already been used.")
-
-    if link_token.expiresAt.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-        raise HTTPException(status_code=410, detail="This link has expired.")
-
-    now = datetime.now(timezone.utc)
-    updated = await PlatformLinkToken.prisma().update_many(
-        where={"token": token, "usedAt": None, "expiresAt": {"gt": now}},
-        data={"usedAt": now},
-    )
-    if updated == 0:
-        raise HTTPException(status_code=410, detail="This link has already been used.")
-
-    return link_token

@@ -30,7 +30,7 @@ from backend.copilot.model import (
     create_chat_session,
     get_chat_session,
 )
-from backend.copilot.response_model import StreamFinish
+from backend.copilot.response_model import StreamError, StreamFinish
 
 from . import find_server_link, find_user_link
 from .auth import check_bot_api_key, get_bot_api_key
@@ -116,9 +116,6 @@ async def bot_chat_stream(
         session = await create_chat_session(owner_user_id, dry_run=False)
         session_id = session.session_id
 
-    message = ChatMessage(role="user", content=request.message)
-    await append_and_save_message(session_id, message)
-
     turn_id = str(uuid4())
 
     await stream_registry.create_session(
@@ -156,6 +153,8 @@ async def bot_chat_stream(
 
             # Enqueue AFTER subscribing so the executor can't emit stream
             # events that would arrive before we're listening.
+            # enqueue_copilot_turn handles message persistence, so we don't
+            # persist here to avoid double-persistence.
             await enqueue_copilot_turn(
                 session_id=session_id,
                 user_id=owner_user_id,
@@ -180,7 +179,7 @@ async def bot_chat_stream(
 
         except Exception:
             logger.exception("Bot chat stream error for session %s", session_id)
-            yield 'data: {"type": "error", "content": "Stream error"}\n\n'
+            yield StreamError(errorText="Stream error").to_sse()
             yield "data: [DONE]\n\n"
         finally:
             if subscriber_queue is not None:
