@@ -811,20 +811,21 @@ class TestRetryStateReset:
         assert len(session_messages) == 2
         assert session_messages == ["msg1", "msg2"]
 
-    def test_write_transcript_failure_sets_error_flag(self):
-        """When write_transcript_to_tempfile fails, skip_transcript_upload
-        must be set True to prevent uploading stale data."""
-        # Simulate the logic from service.py lines 1012-1020
-        skip_transcript_upload = False
-        use_resume = True
-        resume_file = None  # write_transcript_to_tempfile returned None
+    def test_cli_session_restore_failure_skips_resume(self):
+        """When restore_cli_session returns False, --resume is not used.
+        The transcript builder is still populated for future upload_transcript."""
+        # Simulate the logic from the primary resume path in service.py.
+        use_resume = False
+        resume_file = None
+        cli_restored = False  # restore_cli_session returned False
 
-        if not resume_file:
-            use_resume = False
-            skip_transcript_upload = True
+        if cli_restored:
+            use_resume = True
+            resume_file = "sess-uuid"
 
-        assert skip_transcript_upload is True
+        # resume is not activated; builder state may still be loaded
         assert use_resume is False
+        assert resume_file is None
 
     @pytest.mark.asyncio
     async def test_compact_returns_none_preserves_error_flag(self):
@@ -998,7 +999,8 @@ def _make_sdk_patches(
                 return_value=MagicMock(content=original_transcript, message_count=2),
             ),
         ),
-        (f"{_SVC}.write_transcript_to_tempfile", dict(return_value="/tmp/sess.jsonl")),
+        (f"{_SVC}.restore_cli_session", dict(new_callable=AsyncMock, return_value=True)),
+        (f"{_SVC}.upload_cli_session", dict(new_callable=AsyncMock)),
         (f"{_SVC}.validate_transcript", dict(return_value=True)),
         (
             f"{_SVC}.compact_transcript",

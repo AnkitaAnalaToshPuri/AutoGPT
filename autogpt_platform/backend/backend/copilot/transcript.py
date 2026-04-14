@@ -55,6 +55,8 @@ class TranscriptDownload:
 
 # Workspace storage constants — deterministic path from session_id.
 TRANSCRIPT_STORAGE_PREFIX = "chat-transcripts"
+# Storage prefix for the CLI's native session JSONL files (for cross-pod --resume).
+_CLI_SESSION_STORAGE_PREFIX = "cli-sessions"
 
 
 # ---------------------------------------------------------------------------
@@ -650,6 +652,148 @@ def _build_meta_storage_path(user_id: str, session_id: str, backend: object) -> 
     return _build_path_from_parts(
         _meta_storage_path_parts(user_id, session_id), backend
     )
+
+
+# ---------------------------------------------------------------------------
+# CLI native session file — cross-pod --resume support
+# ---------------------------------------------------------------------------
+
+
+def _cli_session_path(sdk_cwd: str, session_id: str) -> str:
+    """Expected path of the CLI's native session JSONL file.
+
+    The CLI encodes the working directory by replacing '/' with '-', then
+    places its session file at::
+
+        {projects_base}/{encoded_cwd}/{session_id}.jsonl
+
+    When we pass ``--session-id {session_id}``, the CLI uses the app session
+    UUID as its own session UUID, making the file path predictable.
+    """
+    encoded_cwd = sdk_cwd.replace("/", "-")
+    safe_id = _sanitize_id(session_id)
+    return os.path.join(_projects_base(), encoded_cwd, f"{safe_id}.jsonl")
+
+
+def _cli_session_storage_path_parts(
+    user_id: str, session_id: str
+) -> tuple[str, str, str]:
+    """Return (workspace_id, file_id, filename) for a CLI session file in storage."""
+    return (
+        _CLI_SESSION_STORAGE_PREFIX,
+        _sanitize_id(user_id),
+        f"{_sanitize_id(session_id)}.jsonl",
+    )
+
+
+async def upload_cli_session(
+    user_id: str,
+    session_id: str,
+    sdk_cwd: str,
+    log_prefix: str = "[Transcript]",
+) -> None:
+    """Upload the CLI's native session JSONL file to remote storage.
+
+    Called after each turn so the next turn can restore the file on any pod
+    (eliminating the pod-affinity requirement for --resume).
+
+    The CLI only writes the session file after the turn completes, so this
+    must run in the finally block, AFTER the SDK stream has finished.
+    """
+    session_file = _cli_session_path(sdk_cwd, session_id)
+    real_path = os.path.realpath(session_file)
+    projects_base = _projects_base()
+
+    if not real_path.startswith(projects_base + os.sep):
+        logger.warning(
+            "%s CLI session file outside projects base, skipping upload: %s",
+            log_prefix,
+            session_file,
+        )
+        return
+
+    try:
+        content = Path(real_path).read_bytes()
+    except FileNotFoundError:
+        logger.debug(
+            "%s CLI session file not found, skipping upload: %s",
+            log_prefix,
+            session_file,
+        )
+        return
+    except OSError as e:
+        logger.warning("%s Failed to read CLI session file: %s", log_prefix, e)
+        return
+
+    storage = await get_workspace_storage()
+    wid, fid, fname = _cli_session_storage_path_parts(user_id, session_id)
+    try:
+        await storage.store(
+            workspace_id=wid, file_id=fid, filename=fname, content=content
+        )
+        logger.info(
+            "%s Uploaded CLI session file (%dB) for cross-pod --resume",
+            log_prefix,
+            len(content),
+        )
+    except Exception as e:
+        logger.warning("%s Failed to upload CLI session file: %s", log_prefix, e)
+
+
+async def restore_cli_session(
+    user_id: str,
+    session_id: str,
+    sdk_cwd: str,
+    log_prefix: str = "[Transcript]",
+) -> bool:
+    """Download and restore the CLI's native session file for --resume.
+
+    Returns True if the file was successfully restored and --resume can be
+    used with the session UUID.  Returns False if not available (first turn
+    or upload failed), in which case the caller should not set --resume.
+    """
+    storage = await get_workspace_storage()
+    wid, fid, fname = _cli_session_storage_path_parts(user_id, session_id)
+
+    if isinstance(storage, GCSWorkspaceStorage):
+        blob = f"workspaces/{wid}/{fid}/{fname}"
+        path = f"gcs://{storage.bucket_name}/{blob}"
+    else:
+        path = f"local://{wid}/{fid}/{fname}"
+
+    try:
+        content = await storage.retrieve(path)
+    except FileNotFoundError:
+        logger.debug("%s No CLI session in storage (first turn or missing)", log_prefix)
+        return False
+    except Exception as e:
+        logger.warning("%s Failed to download CLI session: %s", log_prefix, e)
+        return False
+
+    session_file = _cli_session_path(sdk_cwd, session_id)
+    real_path = os.path.realpath(session_file)
+    projects_base = _projects_base()
+
+    if not real_path.startswith(projects_base + os.sep):
+        logger.warning(
+            "%s CLI session restore path outside projects base: %s",
+            log_prefix,
+            session_file,
+        )
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(real_path), exist_ok=True)
+        Path(real_path).write_bytes(content)
+        logger.info(
+            "%s Restored CLI session file (%dB) for --resume",
+            log_prefix,
+            len(content),
+        )
+        return True
+    except OSError as e:
+        logger.warning("%s Failed to write CLI session file: %s", log_prefix, e)
+        return False
 
 
 async def upload_transcript(
