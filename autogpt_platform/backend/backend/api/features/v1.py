@@ -854,10 +854,13 @@ async def update_subscription_tier(
         await set_subscription_tier(user_id, tier)
         return SubscriptionCheckoutResponse(url="")
 
-    # Beta users (payment not enabled) → update tier directly without Stripe.
+    # Paid tier changes require payment to be enabled — block self-service upgrades
+    # when the flag is off.  Admins use the /api/admin/ routes to set tiers directly.
     if not payment_enabled:
-        await set_subscription_tier(user_id, tier)
-        return SubscriptionCheckoutResponse(url="")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Subscription not available for tier {tier}",
+        )
 
     # No-op short-circuit: if the user is already on the requested paid tier,
     # do NOT create a new Checkout Session. Without this guard, a duplicate
