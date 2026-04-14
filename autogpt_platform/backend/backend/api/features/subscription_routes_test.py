@@ -233,7 +233,7 @@ def test_update_subscription_tier_paid_beta_user(
     client: fastapi.testclient.TestClient,
     mocker: pytest_mock.MockFixture,
 ) -> None:
-    """POST /credits/subscription for paid tier when payment disabled sets tier directly."""
+    """POST /credits/subscription for paid tier when payment disabled returns 422."""
     mock_user = Mock()
     mock_user.subscription_tier = SubscriptionTier.FREE
 
@@ -249,15 +249,11 @@ def test_update_subscription_tier_paid_beta_user(
         "backend.api.features.v1.is_feature_enabled",
         side_effect=mock_feature_disabled,
     )
-    mocker.patch(
-        "backend.api.features.v1.set_subscription_tier",
-        new_callable=AsyncMock,
-    )
 
     response = client.post("/credits/subscription", json={"tier": "PRO"})
 
-    assert response.status_code == 200
-    assert response.json()["url"] == ""
+    assert response.status_code == 422
+    assert "not available" in response.json()["detail"]
 
 
 def test_update_subscription_tier_paid_requires_urls(
