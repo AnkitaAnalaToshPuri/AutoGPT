@@ -2297,10 +2297,6 @@ async def stream_chat_completion_sdk(
             "disallowed_tools": disallowed,
             "hooks": security_hooks,
             "cwd": sdk_cwd,
-            # Force CLI to use the app session UUID so the native session file
-            # lands at a predictable path: {projects_base}/{encoded_cwd}/{session_id}.jsonl
-            # This enables cross-pod --resume without pod affinity.
-            "session_id": session_id,
             "max_buffer_size": config.claude_agent_max_buffer_size,
             "stderr": _on_stderr,
             # --- P0 guardrails ---
@@ -2330,7 +2326,16 @@ async def stream_chat_completion_sdk(
         if sdk_env:
             sdk_options_kwargs["env"] = sdk_env
         if use_resume and resume_file:
+            # --resume {uuid} implies the session UUID — do NOT also pass
+            # --session-id here.  CLI >=2.1.97 rejects the combination of
+            # --session-id + --resume unless --fork-session is also given.
             sdk_options_kwargs["resume"] = resume_file
+        else:
+            # No --resume on this turn: force the CLI to write its native
+            # session JSONL to a predictable path so upload_cli_session()
+            # can find it after the turn completes.
+            # Path: {projects_base}/{encoded_cwd}/{session_id}.jsonl
+            sdk_options_kwargs["session_id"] = session_id
         # Optional explicit Claude Code CLI binary path (decouples the
         # bundled SDK version from the CLI version we run — needed because
         # the CLI bundled in 0.1.46+ is broken against OpenRouter).  Falls
