@@ -771,6 +771,29 @@ async def test_get_subscription_price_id_empty_flag_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_get_subscription_price_id_none_not_cached():
+    """None returns from transient LD failures are not cached (cache_none=False).
+
+    Without cache_none=False a single LD hiccup would block upgrades for the
+    full 60-second TTL window because the ``None`` sentinel would be served from
+    cache on every subsequent call.
+    """
+    from backend.data.credit import get_subscription_price_id
+
+    get_subscription_price_id.cache_clear()  # type: ignore[attr-defined]
+    mock_ld = AsyncMock(side_effect=["", "price_pro_monthly"])
+    with patch("backend.data.credit.get_feature_flag_value", mock_ld):
+        # First call: LD returns empty string → None (transient failure)
+        first = await get_subscription_price_id(SubscriptionTier.PRO)
+        assert first is None
+        # Second call: LD returns the real price ID — must NOT be blocked by cached None
+        second = await get_subscription_price_id(SubscriptionTier.PRO)
+        assert second == "price_pro_monthly"
+        assert mock_ld.call_count == 2  # both calls hit LD (None was not cached)
+    get_subscription_price_id.cache_clear()  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_cancel_stripe_subscription_raises_on_cancel_error():
     """Stripe errors during cancellation are re-raised so the DB tier is not updated."""
     import stripe as stripe_mod

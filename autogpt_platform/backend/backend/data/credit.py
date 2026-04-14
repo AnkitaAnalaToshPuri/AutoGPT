@@ -1348,13 +1348,18 @@ async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
     return AutoTopUpConfig.model_validate(user.top_up_config)
 
 
-@cached(ttl_seconds=60, maxsize=8)
+@cached(ttl_seconds=60, maxsize=8, cache_none=False)
 async def get_subscription_price_id(tier: SubscriptionTier) -> str | None:
     """Return Stripe Price ID for a tier from LaunchDarkly, cached for 60 seconds.
 
     Price IDs are LaunchDarkly flag values that change only at deploy time.
     Caching for 60 seconds avoids hitting the LD SDK on every webhook delivery
     and every GET /credits/subscription page load (called 2x per request).
+
+    ``cache_none=False`` prevents a transient LD failure from caching ``None``
+    and blocking subscription upgrades for the full 60-second TTL window.
+    A tier with no configured flag (FREE, ENTERPRISE) returns ``None`` from an
+    O(1) dict lookup before hitting LD, so the extra LD call is never made.
     """
     flag_map = {
         SubscriptionTier.PRO: Flag.STRIPE_PRICE_PRO,
