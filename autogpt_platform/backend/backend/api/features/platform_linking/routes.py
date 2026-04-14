@@ -119,9 +119,7 @@ async def create_link_token(
         expires_at.isoformat(),
     )
 
-    link_base_url = os.getenv(
-        "PLATFORM_LINK_BASE_URL", "https://platform.agpt.co/link"
-    )
+    link_base_url = os.getenv("PLATFORM_LINK_BASE_URL", "https://platform.agpt.co/link")
 
     # Include platform in URL so the frontend can show the right copy
     # without needing a separate API call.

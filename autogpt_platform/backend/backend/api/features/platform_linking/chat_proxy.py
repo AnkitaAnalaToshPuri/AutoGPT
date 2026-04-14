@@ -182,9 +182,7 @@ async def bot_chat_stream(
 
             while True:
                 try:
-                    chunk = await asyncio.wait_for(
-                        subscriber_queue.get(), timeout=30.0
-                    )
+                    chunk = await asyncio.wait_for(subscriber_queue.get(), timeout=30.0)
 
                     yield chunk if isinstance(chunk, str) else chunk.to_sse()
 
@@ -197,9 +195,7 @@ async def bot_chat_stream(
                     yield ": keepalive\n\n"
 
         except Exception:
-            logger.exception(
-                "Bot chat stream error for session %s", session_id
-            )
+            logger.exception("Bot chat stream error for session %s", session_id)
             yield 'data: {"type": "error", "content": "Stream error"}\n\n'
             yield "data: [DONE]\n\n"
         finally:

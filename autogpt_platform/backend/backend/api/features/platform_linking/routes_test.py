@@ -211,9 +211,7 @@ class TestResolveEndpoint:
     @pytest.mark.asyncio
     @patch.dict("os.environ", {"PLATFORM_BOT_API_KEY": "testkey"}, clear=False)
     async def test_resolve_linked_server(self):
-        from backend.api.features.platform_linking.routes import (
-            resolve_platform_server,
-        )
+        from backend.api.features.platform_linking.routes import resolve_platform_server
 
         mock_link = MagicMock()
         mock_link.userId = "autogpt-user-123"
@@ -237,9 +235,7 @@ class TestResolveEndpoint:
     @pytest.mark.asyncio
     @patch.dict("os.environ", {"PLATFORM_BOT_API_KEY": "testkey"}, clear=False)
     async def test_resolve_unlinked_server(self):
-        from backend.api.features.platform_linking.routes import (
-            resolve_platform_server,
-        )
+        from backend.api.features.platform_linking.routes import resolve_platform_server
 
         with patch(
             "backend.api.features.platform_linking.routes.PlatformLink"
@@ -258,9 +254,7 @@ class TestResolveEndpoint:
     @pytest.mark.asyncio
     @patch.dict("os.environ", {"PLATFORM_BOT_API_KEY": "testkey"}, clear=False)
     async def test_resolve_rejects_wrong_api_key(self):
-        from backend.api.features.platform_linking.routes import (
-            resolve_platform_server,
-        )
+        from backend.api.features.platform_linking.routes import resolve_platform_server
 
         with pytest.raises(HTTPException) as exc_info:
             await resolve_platform_server(
@@ -290,9 +284,7 @@ class TestCreateLinkTokenEndpoint:
             mock_link_model.prisma.return_value.find_first = AsyncMock(
                 return_value=None
             )
-            mock_token_model.prisma.return_value.update_many = AsyncMock(
-                return_value=0
-            )
+            mock_token_model.prisma.return_value.update_many = AsyncMock(return_value=0)
             mock_token_model.prisma.return_value.create = AsyncMock(
                 return_value=MagicMock()
             )
