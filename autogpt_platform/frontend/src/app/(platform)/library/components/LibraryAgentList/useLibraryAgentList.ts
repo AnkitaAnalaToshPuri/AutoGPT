@@ -272,12 +272,12 @@ export function useLibraryAgentList({
 
     if (newFilteredCount > previousCount) {
       setConsecutiveEmptyPages(0);
-    } else if (!isFetchingNextPage) {
+    } else if (!agentsIsFetchingNextPage) {
       setConsecutiveEmptyPages((prev) => prev + 1);
     }
 
     prevFilteredLengthRef.current = newFilteredCount;
-  }, [filteredAgents.length, statusFilter, isFetchingNextPage]);
+  }, [filteredAgents.length, statusFilter, agentsIsFetchingNextPage]);
 
   useEffect(() => {
     setConsecutiveEmptyPages(0);
