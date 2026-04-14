@@ -266,7 +266,7 @@ class LibraryAgent(pydantic.BaseModel):
         )
         success_rate: float | None = None
         avg_correctness_score: float | None = None
-        if execution_count > 0:
+        if executions and execution_count > 0:
             success_count = sum(
                 1
                 for e in executions
