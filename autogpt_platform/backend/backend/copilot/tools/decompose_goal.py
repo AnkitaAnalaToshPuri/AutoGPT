@@ -23,11 +23,15 @@ MAX_STEPS = 8
 DEFAULT_ACTION = "add_block"
 VALID_ACTIONS = {"add_block", "connect_blocks", "configure", "add_input", "add_output"}
 
-# Auto-approve countdown — single source of truth for both client and server.
-# The frontend reads ``auto_approve_seconds`` from the tool response and runs
-# the visible countdown. The server fires at the same deadline.
+# Auto-approve countdown — the frontend reads ``auto_approve_seconds`` from the
+# tool response and runs the visible countdown (60s). The server fires 5s later
+# as a fallback for the "user closed the tab" case. The 5s gap ensures the
+# client always fires first when present, creating the SSE subscription that
+# lets the user see the build in real-time. When the server wakes at 65s, it
+# checks the predicate and skips (the client's message is already there).
 AUTO_APPROVE_CLIENT_SECONDS = 60
-AUTO_APPROVE_SERVER_SECONDS = AUTO_APPROVE_CLIENT_SECONDS
+AUTO_APPROVE_SERVER_GRACE_SECONDS = 5
+AUTO_APPROVE_SERVER_SECONDS = AUTO_APPROVE_CLIENT_SECONDS + AUTO_APPROVE_SERVER_GRACE_SECONDS
 AUTO_APPROVE_MESSAGE = "Approved. Please build the agent."
 
 # Redis key prefix for cross-process cancel signalling. The cancel

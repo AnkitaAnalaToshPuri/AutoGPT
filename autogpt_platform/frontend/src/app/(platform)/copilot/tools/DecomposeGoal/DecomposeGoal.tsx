@@ -209,11 +209,17 @@ export function DecomposeGoalTool({
     return () => clearInterval(interval);
   }, [showActions, timerActive, part.toolCallId]);
 
-  // The server-side timer is the sole auto-approver (sends the synthetic
-  // "Approved" message and enqueues the next copilot turn). The client
-  // countdown is purely visual — no client-side approve() call when it
-  // hits 0. This avoids the duplicate-message bug where both client and
-  // server fire at ~60s. User clicks (Start now / Approve) still work.
+  // Auto-approve when countdown reaches 0. The client fires at 60s; the
+  // server fires 5s later as a fallback for the "user closed the tab" case.
+  // When the client IS present, its approve() creates the SSE subscription
+  // so the user sees the build in real-time. The server's predicate then
+  // sees the user's message and skips — no duplicate.
+  // approve() is stable via approvedRef — safe to omit from deps.
+  useEffect(() => {
+    if (secondsLeft === 0 && timerActive && actionsEnabled) {
+      approve();
+    }
+  }, [secondsLeft, timerActive, actionsEnabled]);
 
   const progress = secondsLeft / countdownSeconds;
   const dashOffset = CIRCUMFERENCE * (1 - progress);
