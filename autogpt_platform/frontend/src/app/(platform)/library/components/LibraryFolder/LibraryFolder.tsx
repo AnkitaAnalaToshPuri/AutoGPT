@@ -82,7 +82,7 @@ export function LibraryFolder({
             data-testid="library-folder-name"
             className="line-clamp-2 hyphens-auto break-words"
           >
-            {name} Folder
+            {name}
           </Text>
           <div className="flex items-center gap-2">
             <Text

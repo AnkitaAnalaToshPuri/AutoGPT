@@ -8,16 +8,8 @@ import {
 } from "@phosphor-icons/react";
 import NextLink from "next/link";
 import { StatusBadge } from "@/app/(platform)/library/components/StatusBadge/StatusBadge";
-import type { AgentStatus } from "@/app/(platform)/library/types";
 import styles from "./PulseChips.module.css";
-
-export interface PulseChipData {
-  id: string;
-  agentID: string;
-  name: string;
-  status: AgentStatus;
-  shortMessage: string;
-}
+import type { PulseChipData } from "./types";
 
 interface Props {
   chips: PulseChipData[];

@@ -42,6 +42,26 @@ export interface FleetSummary {
   monthlySpend: number;
 }
 
+export type SitrepPriority =
+  | "error"
+  | "running"
+  | "stale"
+  | "success"
+  | "listening"
+  | "scheduled"
+  | "idle";
+
+export interface SitrepItemData {
+  id: string;
+  agentID: string;
+  agentName: string;
+  agentImageUrl?: string | null;
+  executionID?: string;
+  priority: SitrepPriority;
+  message: string;
+  status: AgentStatus;
+}
+
 /** Filter options for the agent filter dropdown. */
 export type AgentStatusFilter =
   | "all"

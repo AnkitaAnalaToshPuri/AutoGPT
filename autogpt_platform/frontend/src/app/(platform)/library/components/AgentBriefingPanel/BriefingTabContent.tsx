@@ -3,8 +3,10 @@
 import type { CoPilotUsageStatus } from "@/app/api/__generated__/models/coPilotUsageStatus";
 import type { LibraryAgent } from "@/app/api/__generated__/models/libraryAgent";
 import { useGetV2GetCopilotUsage } from "@/app/api/__generated__/endpoints/chat/chat";
-import { formatResetTime } from "@/app/(platform)/copilot/components/UsageLimits/UsagePanelContent";
-import { formatCents } from "@/app/(platform)/copilot/components/RateLimitResetDialog/RateLimitResetDialog";
+import {
+  formatResetTime,
+  formatCents,
+} from "@/app/(platform)/copilot/components/usageHelpers";
 import { useResetRateLimit } from "@/app/(platform)/copilot/hooks/useResetRateLimit";
 import { Button } from "@/components/atoms/Button/Button";
 import { Badge } from "@/components/atoms/Badge/Badge";

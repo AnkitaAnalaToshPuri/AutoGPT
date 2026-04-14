@@ -14,29 +14,9 @@ import {
 import NextLink from "next/link";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import type { AgentStatus } from "../../types";
+import type { SitrepItemData, SitrepPriority } from "../../types";
 import { ContextualActionButton } from "../ContextualActionButton/ContextualActionButton";
 import styles from "./SitrepItem.module.css";
-
-export type SitrepPriority =
-  | "error"
-  | "running"
-  | "stale"
-  | "success"
-  | "listening"
-  | "scheduled"
-  | "idle";
-
-export interface SitrepItemData {
-  id: string;
-  agentID: string;
-  agentName: string;
-  agentImageUrl?: string | null;
-  executionID?: string;
-  priority: SitrepPriority;
-  message: string;
-  status: AgentStatus;
-}
 
 interface Props {
   item: SitrepItemData;

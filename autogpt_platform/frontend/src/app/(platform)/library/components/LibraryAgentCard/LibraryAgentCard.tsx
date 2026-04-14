@@ -15,7 +15,7 @@ import { useLibraryAgentCard } from "./useLibraryAgentCard";
 import { useFavoriteAnimation } from "../../context/FavoriteAnimationContext";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
 import { ContextualActionButton } from "../ContextualActionButton/ContextualActionButton";
-import { useAgentStatus } from "../../hooks/useAgentStatus";
+import type { AgentStatusInfo } from "../../types";
 import {
   Tooltip,
   TooltipContent,
@@ -24,14 +24,18 @@ import {
 
 interface Props {
   agent: LibraryAgent;
+  statusInfo: AgentStatusInfo;
   draggable?: boolean;
 }
 
-export function LibraryAgentCard({ agent, draggable = true }: Props) {
+export function LibraryAgentCard({
+  agent,
+  statusInfo,
+  draggable = true,
+}: Props) {
   const { id, name, image_url } = agent;
   const router = useRouter();
   const { triggerFavoriteAnimation } = useFavoriteAnimation();
-  const statusInfo = useAgentStatus(agent);
 
   function handleDragStart(e: React.DragEvent<HTMLDivElement>) {
     e.dataTransfer.setData("application/agent-id", id);

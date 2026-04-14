@@ -21,6 +21,7 @@ import type { LibraryTab, AgentStatusFilter, FleetSummary } from "../../types";
 import { useLibraryAgentList } from "./useLibraryAgentList";
 import { AgentBriefingPanel } from "../AgentBriefingPanel/AgentBriefingPanel";
 import { Flag, useGetFlag } from "@/services/feature-flags/use-get-flag";
+import { useAgentStatusMap, getAgentStatus } from "../../hooks/useAgentStatus";
 
 // cancels the current spring and starts a new one from current state.
 const containerVariants = {
@@ -131,6 +132,8 @@ export function LibraryAgentList({
     activeTab,
     statusFilter,
   });
+
+  const agentStatusMap = useAgentStatusMap(agents);
 
   return (
     <>
@@ -248,7 +251,13 @@ export function LibraryAgentList({
                           0.04,
                       }}
                     >
-                      <LibraryAgentCard agent={agent} />
+                      <LibraryAgentCard
+                        agent={agent}
+                        statusInfo={getAgentStatus(
+                          agentStatusMap,
+                          agent.graph_id,
+                        )}
+                      />
                     </motion.div>
                   ))}
                 </motion.div>

@@ -11,27 +11,13 @@ import { useExecutionEvents } from "@/hooks/useExecutionEvents";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import type { FleetSummary } from "../types";
-
-const SEVENTY_TWO_HOURS_MS = 72 * 60 * 60 * 1000;
-
-function isActiveExecution(status: string): boolean {
-  return (
-    status === AgentExecutionStatus.RUNNING ||
-    status === AgentExecutionStatus.QUEUED ||
-    status === AgentExecutionStatus.REVIEW
-  );
-}
+import { isActive, isFailed, SEVENTY_TWO_HOURS_MS } from "./executionHelpers";
 
 function isRecentFailure(
   status: string,
   endedAt?: string | Date | null,
 ): boolean {
-  if (
-    status !== AgentExecutionStatus.FAILED &&
-    status !== AgentExecutionStatus.TERMINATED
-  ) {
-    return false;
-  }
+  if (!isFailed(status)) return false;
   if (!endedAt) return false;
   const ts =
     endedAt instanceof Date ? endedAt.getTime() : new Date(endedAt).getTime();
@@ -80,7 +66,7 @@ export function useLibraryFleetSummary(
     const agentsWithRecentCompletion = new Set<string>();
 
     for (const exec of executions) {
-      if (isActiveExecution(exec.status)) {
+      if (isActive(exec.status)) {
         agentsWithActiveExecution.add(exec.graph_id);
       }
       if (isRecentFailure(exec.status, exec.ended_at)) {

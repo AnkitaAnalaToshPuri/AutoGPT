@@ -50,7 +50,7 @@ export function useLibraryAgentList({
   const stableQueryClient = getQueryClient();
   const queryClient = useQueryClient();
   const prevSortRef = useRef<LibraryAgentSort | null>(null);
-  const consecutiveEmptyPagesRef = useRef(0);
+  const [consecutiveEmptyPages, setConsecutiveEmptyPages] = useState(0);
   const prevFilteredLengthRef = useRef(0);
 
   const [editingFolder, setEditingFolder] = useState<LibraryFolder | null>(
@@ -260,10 +260,9 @@ export function useLibraryAgentList({
     completedGraphIds,
   );
 
-  // Track consecutive pages that produced no new filtered items
   useEffect(() => {
     if (statusFilter === "all") {
-      consecutiveEmptyPagesRef.current = 0;
+      setConsecutiveEmptyPages(0);
       prevFilteredLengthRef.current = filteredAgents.length;
       return;
     }
@@ -272,26 +271,21 @@ export function useLibraryAgentList({
     const previousCount = prevFilteredLengthRef.current;
 
     if (newFilteredCount > previousCount) {
-      // New filtered items were added, reset counter
-      consecutiveEmptyPagesRef.current = 0;
-    } else if (!isFetchingNextPage && previousCount > 0) {
-      // No new items and not currently fetching means last fetch was empty
-      consecutiveEmptyPagesRef.current++;
+      setConsecutiveEmptyPages(0);
+    } else if (!isFetchingNextPage) {
+      setConsecutiveEmptyPages((prev) => prev + 1);
     }
 
     prevFilteredLengthRef.current = newFilteredCount;
   }, [filteredAgents.length, statusFilter, isFetchingNextPage]);
 
-  // Reset counter when statusFilter changes
   useEffect(() => {
-    consecutiveEmptyPagesRef.current = 0;
+    setConsecutiveEmptyPages(0);
     prevFilteredLengthRef.current = 0;
   }, [statusFilter]);
 
-  // Derive filteredExhausted: stop fetching when threshold reached
   const filteredExhausted =
-    statusFilter !== "all" &&
-    consecutiveEmptyPagesRef.current >= FILTER_EXHAUST_THRESHOLD;
+    statusFilter !== "all" && consecutiveEmptyPages >= FILTER_EXHAUST_THRESHOLD;
 
   // When a filter is active, show the filtered count instead of the API total.
   const displayedCount =

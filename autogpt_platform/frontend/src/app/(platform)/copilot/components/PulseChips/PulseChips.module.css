@@ -26,7 +26,7 @@
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: rotateBorder 6s linear infinite;
+  animation: rotate-border 6s linear infinite;
   pointer-events: none;
   z-index: -1;
 }
@@ -37,7 +37,7 @@
   inherits: false;
 }
 
-@keyframes rotateBorder {
+@keyframes rotate-border {
   to {
     --border-angle: 360deg;
   }

@@ -82,5 +82,3 @@ function statusDotColor(status: AgentStatus): string {
       return "bg-zinc-400";
   }
 }
-
-export { STATUS_CONFIG };

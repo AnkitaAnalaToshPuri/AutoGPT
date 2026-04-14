@@ -128,7 +128,7 @@ describe("LibraryPage", () => {
     expect(favoritesTab!.hasAttribute("data-disabled")).toBe(true);
   });
 
-  test.skip("renders folders alongside agents", async () => {
+  test("renders folders alongside agents", async () => {
     setupHandlers({
       folders: {
         folders: [

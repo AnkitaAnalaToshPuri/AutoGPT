@@ -2,7 +2,7 @@
 
 import { useGetV2ListLibraryAgents } from "@/app/api/__generated__/endpoints/library/library";
 import { useSitrepItems } from "@/app/(platform)/library/components/SitrepItem/useSitrepItems";
-import type { PulseChipData } from "./PulseChips";
+import type { PulseChipData } from "./types";
 import { useMemo } from "react";
 
 export function usePulseChips(): PulseChipData[] {
