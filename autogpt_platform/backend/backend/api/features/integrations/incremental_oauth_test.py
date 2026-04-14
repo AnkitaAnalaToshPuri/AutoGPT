@@ -29,7 +29,11 @@ def _make_google_oauth2_cred(
         title=title,
         access_token=SecretStr("ya29.access-token"),
         refresh_token=SecretStr("1//refresh-token"),
-        scopes=scopes or ["https://www.googleapis.com/auth/gmail.readonly"],
+        scopes=(
+            scopes
+            if scopes is not None
+            else ["https://www.googleapis.com/auth/gmail.readonly"]
+        ),
         username=username,
         access_token_expires_at=9999999999,
     )
@@ -47,7 +51,7 @@ def _make_github_oauth2_cred(
         title=title,
         access_token=SecretStr("ghp_access_token"),
         refresh_token=SecretStr("ghp_refresh_token"),
-        scopes=scopes or ["repo"],
+        scopes=scopes if scopes is not None else ["repo"],
         username=username,
     )
 

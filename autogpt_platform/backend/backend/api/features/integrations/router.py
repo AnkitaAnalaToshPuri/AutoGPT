@@ -614,7 +614,7 @@ async def _prepare_scope_upgrade(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only OAuth2 credentials can be upgraded",
         )
-    if existing.provider != provider and existing.provider != provider.value:
+    if not provider_matches(existing.provider, provider.value):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Credential provider does not match the requested provider",
@@ -643,13 +643,20 @@ async def _merge_or_create_credential(
     if credential_id:
         return await _upgrade_existing_credential(user_id, credential_id, credentials)
 
-    # Implicit merge: check for existing credential with same provider+username
+    # Implicit merge: check for existing credential with same provider+username.
+    # Skip managed/system credentials and require a non-None username on both
+    # sides so we never accidentally merge unrelated credentials.
+    if credentials.username is None:
+        await creds_manager.create(user_id, credentials)
+        return credentials
+
     existing_creds = await creds_manager.store.get_creds_by_provider(user_id, provider)
     matching = next(
         (
             c
             for c in existing_creds
             if isinstance(c, OAuth2Credentials)
+            and not c.is_managed
             and c.username is not None
             and c.username == credentials.username
         ),
@@ -689,6 +696,7 @@ async def _upgrade_existing_credential(
     new_credentials.id = existing.id
     new_credentials.title = existing.title
     new_credentials.scopes = merged_scopes
+    new_credentials.metadata = {**existing.metadata, **(new_credentials.metadata or {})}
     await creds_manager.update(user_id, new_credentials)
     return new_credentials
 
