@@ -26,6 +26,7 @@ from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolPara
 from opentelemetry import trace as otel_trace
 
 from backend.copilot.config import CopilotMode
+from backend.util import json as util_json
 from backend.copilot.context import get_workspace_manager, set_execution_context
 from backend.copilot.graphiti.config import is_enabled_for_user
 from backend.copilot.model import (
@@ -66,7 +67,6 @@ from backend.copilot.tracking import track_user_message
 from backend.copilot.transcript import (
     STOP_REASON_END_TURN,
     STOP_REASON_TOOL_USE,
-    TranscriptDownload,
     detect_gap,
     download_transcript,
     strip_for_upload,
@@ -723,8 +723,6 @@ def _append_gap_to_builder(
     Converts ChatMessage (OpenAI format) to TranscriptBuilder entries
     (Claude CLI JSONL format) so the uploaded transcript covers all turns.
     """
-    import orjson
-
     for msg in gap:
         if msg.role == "user":
             builder.append_user(msg.content or "")
@@ -735,16 +733,17 @@ def _append_gap_to_builder(
             if msg.tool_calls:
                 for tc in msg.tool_calls:
                     fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    try:
-                        input_data = orjson.loads(fn.get("arguments", "{}"))
-                    except Exception:
-                        input_data = {}
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": tc.get("id", "") if isinstance(tc, dict) else "",
-                        "name": fn.get("name", "unknown"),
-                        "input": input_data,
-                    })
+                    input_data = util_json.loads(
+                        fn.get("arguments", "{}"), fallback={}
+                    )
+                    content_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", "") if isinstance(tc, dict) else "",
+                            "name": fn.get("name", "unknown"),
+                            "input": input_data,
+                        }
+                    )
             if content_blocks:
                 builder.append_assistant(content_blocks=content_blocks)
         elif msg.role == "tool" and msg.tool_call_id:
