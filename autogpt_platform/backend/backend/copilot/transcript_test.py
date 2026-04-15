@@ -19,6 +19,7 @@ from .transcript import (
     _rechain_tail,
     _sanitize_id,
     _transcript_to_messages,
+    detect_gap,
     strip_for_upload,
     validate_transcript,
 )
@@ -948,3 +949,83 @@ class TestRestoreCliSession:
             )
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# detect_gap
+# ---------------------------------------------------------------------------
+
+
+def _msgs(*roles: str):
+    """Build a list of ChatMessage objects with the given roles."""
+    from .model import ChatMessage
+
+    return [ChatMessage(role=r, content=f"{r}-{i}") for i, r in enumerate(roles)]
+
+
+class TestDetectGap:
+    """``detect_gap`` returns messages between transcript watermark and current turn."""
+
+    def _dl(self, message_count: int) -> TranscriptDownload:
+        return TranscriptDownload(content=b"", message_count=message_count, mode="sdk")
+
+    def test_zero_watermark_returns_empty(self):
+        """message_count=0 means no watermark — skip gap detection."""
+        dl = self._dl(0)
+        messages = _msgs("user", "assistant", "user")
+        assert detect_gap(dl, messages) == []
+
+    def test_watermark_covers_all_prefix_returns_empty(self):
+        """Transcript already covers all messages up to the current user turn."""
+        # session: [user, assistant, user(current)] — wm=2 means covers up to assistant
+        dl = self._dl(2)
+        messages = _msgs("user", "assistant", "user")
+        assert detect_gap(dl, messages) == []
+
+    def test_watermark_exceeds_session_returns_empty(self):
+        """Watermark ahead of session count (race / over-count) → no gap."""
+        dl = self._dl(10)
+        messages = _msgs("user", "assistant", "user")
+        assert detect_gap(dl, messages) == []
+
+    def test_misaligned_watermark_not_on_assistant_returns_empty(self):
+        """Watermark at a user-role position is misaligned — skip gap."""
+        # wm=1: position 0 is 'user', not 'assistant' → skip
+        dl = self._dl(1)
+        messages = _msgs("user", "assistant", "user", "assistant", "user")
+        assert detect_gap(dl, messages) == []
+
+    def test_returns_gap_messages(self):
+        """Watermark behind session — gap messages returned (excluding current turn)."""
+        # session: [user0, assistant1, user2, assistant3, user4(current)]
+        # wm=2: transcript covers [0,1]; gap = [user2, assistant3]
+        dl = self._dl(2)
+        messages = _msgs("user", "assistant", "user", "assistant", "user")
+        gap = detect_gap(dl, messages)
+        assert len(gap) == 2
+        assert gap[0].role == "user"
+        assert gap[1].role == "assistant"
+
+    def test_excludes_current_user_turn(self):
+        """The last message (current user turn) is never included in the gap."""
+        # wm=2, session has 4 msgs: gap = [msg2] only (msg3 is current turn → excluded)
+        dl = self._dl(2)
+        messages = _msgs("user", "assistant", "user", "user")
+        gap = detect_gap(dl, messages)
+        assert len(gap) == 1
+        assert gap[0].role == "user"
+
+    def test_single_gap_message(self):
+        """One message between watermark and current turn."""
+        # session: [user0, assistant1, user2, assistant3, user4(current)]
+        # wm=3: position 2 is 'user' → misaligned, returns []
+        # use wm=4: but 4 >= total-1=4 → also empty
+        # wm=3 with session [u, a, u, a, u, a, u(current)]: position 2 is 'user' → empty
+        # Valid case: wm=2 has 3 messages (assistant at 1), wm=4 with [u,a,u,a,u,a,u]:
+        # let's use wm=4 with 7 messages: wm=4 >= total-1=6? no, 4<6. pos[3]=assistant → gap=[msg4,msg5]
+        # simpler: wm=2, [u0,a1,a2,u3(current)] — pos[1]=assistant, gap=[a2] only
+        dl = self._dl(2)
+        messages = _msgs("user", "assistant", "assistant", "user")
+        gap = detect_gap(dl, messages)
+        assert len(gap) == 1
+        assert gap[0].role == "assistant"
