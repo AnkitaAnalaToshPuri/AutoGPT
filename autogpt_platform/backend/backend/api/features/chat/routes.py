@@ -514,6 +514,29 @@ async def get_session(
     if page is None:
         raise NotFoundError(f"Session {session_id} not found.")
 
+    # Close the TOCTOU window: if the session was active at pre-check, re-verify
+    # after the DB fetch.  The session may have completed between the two awaits,
+    # which would have caused messages to be fetched newest-first even though the
+    # session is now complete.  Re-fetch from seq 0 so the initial prompt is
+    # always visible.
+    if is_initial_load and active_session is not None:
+        post_active, _ = await stream_registry.get_active_session(session_id, user_id)
+        if post_active is None:
+            active_session = None
+            last_message_id = None
+            from_start = True
+            forward_paginated = True
+            page = await get_chat_messages_paginated(
+                session_id,
+                limit,
+                before_sequence=None,
+                after_sequence=None,
+                from_start=True,
+                user_id=user_id,
+            )
+            if page is None:
+                raise NotFoundError(f"Session {session_id} not found.")
+
     messages = [
         _strip_injected_context(message.model_dump()) for message in page.messages
     ]

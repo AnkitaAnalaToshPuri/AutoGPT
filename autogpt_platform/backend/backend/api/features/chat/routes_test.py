@@ -829,3 +829,39 @@ def test_get_session_both_cursors_returns_400(
     response = client.get("/sessions/sess-1?before_sequence=5&after_sequence=10")
 
     assert response.status_code == 400
+
+
+def test_get_session_toctou_refetch_when_session_completes_mid_request(
+    mocker: pytest_mock.MockerFixture,
+    test_user_id: str,
+) -> None:
+    """Race condition: session was active at pre-check but completes before DB fetch.
+
+    The route should detect the race via a post-fetch re-check, then re-fetch
+    from seq 0 so the initial prompt is always visible.
+    """
+    from backend.copilot.stream_registry import ActiveSession
+
+    page, mock_paginate = _make_paginated_messages(mocker)
+    active = MagicMock(spec=ActiveSession)
+    active.turn_id = "turn-1"
+
+    # First call: session appears active.  Second call: session has completed.
+    mock_get_active = mocker.patch(
+        "backend.api.features.chat.routes.stream_registry.get_active_session",
+        new_callable=AsyncMock,
+        side_effect=[(active, "msg-1"), (None, None)],
+    )
+
+    response = client.get("/sessions/sess-1")
+
+    assert response.status_code == 200
+    data = response.json()
+    # Post-race: session is now completed → forward_paginated=True, no stream
+    assert data["forward_paginated"] is True
+    assert data["active_stream"] is None
+    # The DB was queried twice: once newest-first, once from_start=True
+    assert mock_paginate.call_count == 2
+    assert mock_get_active.call_count == 2
+    second_call = mock_paginate.call_args_list[1]
+    assert second_call.kwargs.get("from_start") is True
