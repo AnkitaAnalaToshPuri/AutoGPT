@@ -56,7 +56,7 @@ from backend.executor.cluster_lock import AsyncClusterLock
 from backend.util.exceptions import NotFoundError
 from backend.util.settings import Settings
 
-from ..config import ChatConfig, CopilotMode
+from ..config import ChatConfig, CopilotLlmModel, CopilotMode
 from ..constants import (
     COPILOT_ERROR_PREFIX,
     COPILOT_RETRYABLE_ERROR_PREFIX,
@@ -131,6 +131,11 @@ _MAX_STREAM_ATTEMPTS = 3
 # guidance on the first empty call, giving the model a chance to
 # self-correct.  The limit is generous to allow recovery attempts.
 _EMPTY_TOOL_CALL_LIMIT = 5
+
+# Cost multiplier for Opus model turns — Opus is ~5× more expensive than Sonnet
+# ($15/$75 vs $3/$15 per M tokens).  Applied to rate-limit counters so Opus
+# turns deplete quota proportionally faster.
+_OPUS_COST_MULTIPLIER = 5.0
 
 # User-facing error shown when the empty-tool-call circuit breaker trips.
 _CIRCUIT_BREAKER_ERROR_MSG = (
@@ -672,6 +677,48 @@ def _resolve_fallback_model() -> str | None:
     if not raw:
         return None
     return _normalize_model_name(raw)
+
+
+async def _resolve_model_and_multiplier(
+    model: "CopilotLlmModel | None",
+    session_id: str,
+) -> tuple[str | None, float]:
+    """Resolve the SDK model string and rate-limit cost multiplier for a turn.
+
+    Priority (highest first):
+    1. Explicit per-request ``model`` tier from the frontend toggle.
+    2. Global config default (``_resolve_sdk_model()``).
+
+    Returns a ``(sdk_model, cost_multiplier)`` pair.
+    ``sdk_model`` is ``None`` when the Claude Code subscription default applies.
+    ``cost_multiplier`` is 5.0 for Opus, 1.0 otherwise.
+    """
+    sdk_model = _resolve_sdk_model()
+
+    if model == "advanced":
+        sdk_model = _normalize_model_name("anthropic/claude-opus-4-6")
+        logger.info(
+            "[SDK] [%s] Per-request model override: advanced (%s)",
+            session_id[:12] if session_id else "?",
+            sdk_model,
+        )
+        return sdk_model, _OPUS_COST_MULTIPLIER
+
+    if model == "standard":
+        # Reset to config default — respects subscription mode (None = CLI default).
+        sdk_model = _resolve_sdk_model()
+        logger.info(
+            "[SDK] [%s] Per-request model override: standard (%s)",
+            session_id[:12] if session_id else "?",
+            sdk_model or "subscription-default",
+        )
+        return sdk_model, 1.0
+
+    # No per-request override; derive multiplier from final resolved model.
+    cost_multiplier = (
+        _OPUS_COST_MULTIPLIER if sdk_model and "opus" in sdk_model else 1.0
+    )
+    return sdk_model, cost_multiplier
 
 
 _MAX_TRANSIENT_BACKOFF_SECONDS = 30
@@ -1865,15 +1912,20 @@ async def _run_stream_attempt(
                 #   cache_read_input_tokens = served from cache
                 #   cache_creation_input_tokens = written to cache
                 if sdk_msg.usage:
-                    state.usage.prompt_tokens += sdk_msg.usage.get("input_tokens", 0)
-                    state.usage.cache_read_tokens += sdk_msg.usage.get(
-                        "cache_read_input_tokens", 0
+                    # Use `or 0` instead of a default in .get() because
+                    # OpenRouter may include the key with a null value (e.g.
+                    # {"cache_read_input_tokens": null}) for models that don't
+                    # yet report cache tokens, making .get("key", 0) return
+                    # None rather than the fallback 0.
+                    state.usage.prompt_tokens += sdk_msg.usage.get("input_tokens") or 0
+                    state.usage.cache_read_tokens += (
+                        sdk_msg.usage.get("cache_read_input_tokens") or 0
                     )
-                    state.usage.cache_creation_tokens += sdk_msg.usage.get(
-                        "cache_creation_input_tokens", 0
+                    state.usage.cache_creation_tokens += (
+                        sdk_msg.usage.get("cache_creation_input_tokens") or 0
                     )
-                    state.usage.completion_tokens += sdk_msg.usage.get(
-                        "output_tokens", 0
+                    state.usage.completion_tokens += (
+                        sdk_msg.usage.get("output_tokens") or 0
                     )
                     logger.info(
                         "%s Token usage: uncached=%d, cache_read=%d, "
@@ -2150,6 +2202,7 @@ async def stream_chat_completion_sdk(
     file_ids: list[str] | None = None,
     permissions: "CopilotPermissions | None" = None,
     mode: CopilotMode | None = None,
+    model: CopilotLlmModel | None = None,
     **_kwargs: Any,
 ) -> AsyncIterator[StreamBaseResponse]:
     """Stream chat completion using Claude Agent SDK.
@@ -2160,6 +2213,9 @@ async def stream_chat_completion_sdk(
             saved to the SDK working directory for the Read tool.
         mode: Accepted for signature compatibility with the baseline path.
             The SDK path does not currently branch on this value.
+        model: Per-request model preference from the frontend toggle.
+            'advanced' → Claude Opus; 'standard' → global config default.
+            Takes priority over per-user LaunchDarkly targeting.
     """
     _ = mode  # SDK path ignores the requested mode.
 
@@ -2274,6 +2330,10 @@ async def stream_chat_completion_sdk(
     turn_cache_creation_tokens = 0
     turn_cost_usd: float | None = None
     graphiti_enabled = False
+    # Defaults ensure the finally block can always reference these safely even when
+    # an early return (e.g. sdk_cwd error) skips their normal assignment below.
+    sdk_model: str | None = None
+    model_cost_multiplier: float = 1.0
 
     # Make sure there is no more code between the lock acquisition and try-block.
     try:
@@ -2485,7 +2545,10 @@ async def stream_chat_completion_sdk(
 
         mcp_server = create_copilot_mcp_server(use_e2b=use_e2b)
 
-        sdk_model = _resolve_sdk_model()
+        # Resolve model and cost multiplier (request tier → config default).
+        sdk_model, model_cost_multiplier = await _resolve_model_and_multiplier(
+            model, session_id
+        )
 
         # Track SDK-internal compaction (PreCompact hook → start, next msg → end)
         compaction = CompactionTracker()
@@ -2571,13 +2634,19 @@ async def stream_chat_completion_sdk(
             # --session-id here.  CLI >=2.1.97 rejects the combination of
             # --session-id + --resume unless --fork-session is also given.
             sdk_options_kwargs["resume"] = resume_file
-        elif not has_history:
-            # T1 only: write CLI native session to a predictable path so
-            # upload_cli_session() can find it after the turn completes.
-            # On T2+ without --resume the T1 session file already exists at
-            # that path; passing --session-id again would fail with
-            # "Session ID already in use".  The upload guard also skips T2+
-            # no-resume turns, so --session-id provides no benefit there.
+        else:
+            # Set session_id whenever NOT resuming so the CLI writes the
+            # native session file to a predictable path for
+            # upload_cli_session() after the turn.  This covers:
+            #   • T1 fresh: no prior history, first SDK turn.
+            #   • Mode-switch T1: has_history=True (prior baseline turns in
+            #     DB) but no CLI session file was ever uploaded — the CLI has
+            #     never been invoked with this session_id before.
+            #   • T2+ without --resume (restore failed): no session file was
+            #     restored to local storage (restore_cli_session returned
+            #     False), so no conflict with an existing file.
+            # When --resume is active the session_id is already implied by
+            # the resume file; passing it again would be rejected by the CLI.
             sdk_options_kwargs["session_id"] = session_id
         # Optional explicit Claude Code CLI binary path (decouples the
         # bundled SDK version from the CLI version we run — needed because
@@ -2775,9 +2844,12 @@ async def stream_chat_completion_sdk(
                 if ctx.use_resume and ctx.resume_file:
                     sdk_options_kwargs_retry["resume"] = ctx.resume_file
                     sdk_options_kwargs_retry.pop("session_id", None)
-                elif not has_history:
-                    # T1 retry: keep session_id so the CLI writes to the
-                    # predictable path for upload_cli_session().
+                elif "session_id" in sdk_options_kwargs:
+                    # Initial invocation used session_id (T1 or mode-switch
+                    # T1): keep it so the CLI writes the session file to the
+                    # predictable path for upload_cli_session().  Storage is
+                    # ephemeral per invocation, so no "Session ID already in
+                    # use" conflict occurs — no prior file was restored.
                     sdk_options_kwargs_retry.pop("resume", None)
                     sdk_options_kwargs_retry["session_id"] = session_id
                 else:
@@ -3170,8 +3242,9 @@ async def stream_chat_completion_sdk(
             cache_creation_tokens=turn_cache_creation_tokens,
             log_prefix=log_prefix,
             cost_usd=turn_cost_usd,
-            model=config.model,
+            model=sdk_model or config.model,
             provider="anthropic",
+            model_cost_multiplier=model_cost_multiplier,
         )
 
         # --- Persist session messages ---
