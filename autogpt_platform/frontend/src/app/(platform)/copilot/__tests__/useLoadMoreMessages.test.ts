@@ -230,6 +230,133 @@ describe("useLoadMoreMessages", () => {
     });
   });
 
+  describe("loadMore — forward pagination cursor advancement", () => {
+    it("advances newestSequence after a successful forward load", async () => {
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: [{ role: "user", content: "hi", sequence: 50 }],
+          has_more_messages: true,
+          newest_sequence: 99,
+        }),
+      );
+
+      const { result } = renderHook(() =>
+        useLoadMoreMessages({ ...BASE_ARGS, forwardPaginated: true }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // A second loadMore should use after_sequence: 99 (advanced cursor)
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({ has_more_messages: false, newest_sequence: 149 }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(mockGetV2GetSession).toHaveBeenLastCalledWith(
+        "sess-1",
+        expect.objectContaining({ after_sequence: 99 }),
+      );
+    });
+
+    it("does not regress newestSequence when parent refetches after pages loaded", async () => {
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: [{ role: "user", content: "msg", sequence: 50 }],
+          has_more_messages: true,
+          newest_sequence: 99,
+        }),
+      );
+
+      const { result, rerender } = renderHook(
+        (props) => useLoadMoreMessages(props),
+        { initialProps: { ...BASE_ARGS, forwardPaginated: true } },
+      );
+
+      // Load one page — newestSequence advances to 99
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // Parent refetches with a lower newest_sequence (49) — should NOT regress cursor
+      rerender({ ...BASE_ARGS, forwardPaginated: true, initialNewestSequence: 49 });
+
+      // Next loadMore should still use the advanced cursor (99)
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({ has_more_messages: false, newest_sequence: 149 }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(mockGetV2GetSession).toHaveBeenLastCalledWith(
+        "sess-1",
+        expect.objectContaining({ after_sequence: 99 }),
+      );
+    });
+  });
+
+  describe("loadMore — MAX_OLDER_MESSAGES truncation", () => {
+    it("truncates accumulated messages at MAX_OLDER_MESSAGES (2000)", async () => {
+      // Simulate being near the limit — 1990 existing paged messages
+      const nearLimitArgs = {
+        ...BASE_ARGS,
+        forwardPaginated: false,
+        initialOldestSequence: 1990,
+      };
+
+      // Return 20 messages to push total past 2000
+      const newMessages = Array.from({ length: 20 }, (_, i) => ({
+        role: "user",
+        content: `msg ${i}`,
+        sequence: i,
+      }));
+
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: newMessages,
+          has_more_messages: true,
+          oldest_sequence: 0,
+        }),
+      );
+
+      const { result, rerender } = renderHook(
+        (props) => useLoadMoreMessages(props),
+        { initialProps: nearLimitArgs },
+      );
+
+      // Pre-fill pagedRawMessages to near limit by doing a successful load first
+      // then checking hasMore is set to false when limit reached
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: Array.from({ length: 1990 }, (_, i) => ({
+            role: "user",
+            content: `old ${i}`,
+            sequence: i,
+          })),
+          has_more_messages: true,
+          oldest_sequence: 0,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // Now add 20 more to exceed 2000 — hasMore should be forced false
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(result.current.hasMore).toBe(false);
+    });
+  });
+
   describe("loadMore — epoch / stale-response guard", () => {
     it("discards response when epoch changes during flight (resetPaged called)", async () => {
       let resolveRequest!: (v: unknown) => void;
