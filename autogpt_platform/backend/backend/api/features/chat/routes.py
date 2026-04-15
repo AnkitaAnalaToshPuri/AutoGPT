@@ -842,17 +842,19 @@ async def stream_chat_post(
     # ── Idempotency guard ────────────────────────────────────────────────────
     # Prevent duplicate executor tasks from concurrent/retry POSTs (e.g. k8s
     # rolling-deploy retries, nginx upstream retries, rapid double-clicks).
-    # We set a Redis NX key keyed on session_id + message hash with a 30 s TTL.
-    # The first POST wins; any subsequent identical POST within the window gets
-    # an empty SSE stream back so the frontend marks the turn done without
-    # creating a ghost response.
+    # We set a Redis NX key keyed on session_id + message hash. The key is
+    # deleted in event_generator's finally block so it only lives while the
+    # request is actively being processed — intentional re-sends of the same
+    # text after the turn completes are never blocked.
+    _dedup_key: str | None = None
+    _dedup_redis = None
     if request.message and request.is_user_message:
         _content_hash = hashlib.sha256(
             f"{session_id}:{request.message}".encode()
         ).hexdigest()[:16]
         _dedup_key = f"chat:msg_dedup:{session_id}:{_content_hash}"
-        _redis = await get_redis_async()
-        _is_new_msg = await _redis.set(_dedup_key, "1", ex=30, nx=True)
+        _dedup_redis = await get_redis_async()
+        _is_new_msg = await _dedup_redis.set(_dedup_key, "1", ex=30, nx=True)
         if not _is_new_msg:
             logger.warning(
                 f"[STREAM] Duplicate user message blocked for session {session_id}, "
@@ -1030,6 +1032,15 @@ async def stream_chat_post(
             ).to_sse()
             yield StreamFinish().to_sse()
         finally:
+            # Release the idempotency key so the user can re-send the same
+            # message after this turn completes. The key was only meant to
+            # block infra-level retries during active processing, not to
+            # prevent intentional re-asks indefinitely.
+            if _dedup_key and _dedup_redis:
+                try:
+                    await _dedup_redis.delete(_dedup_key)
+                except Exception:
+                    pass  # Best-effort; the 30 s TTL is the fallback
             # Unsubscribe when client disconnects or stream ends
             if subscriber_queue is not None:
                 try:
