@@ -1,0 +1,247 @@
+"""Tests for Web Push subscription CRUD operations."""
+
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from backend.data import push_subscription
+
+
+@pytest.fixture
+def mock_prisma(mocker):
+    """Mock PushSubscription.prisma() and return the mock client."""
+    mock_client = MagicMock()
+    mock_client.upsert = AsyncMock()
+    mock_client.find_many = AsyncMock()
+    mock_client.delete_many = AsyncMock()
+    mock_client.update_many = AsyncMock()
+    mocker.patch(
+        "backend.data.push_subscription.PushSubscription.prisma",
+        return_value=mock_client,
+    )
+    return mock_client
+
+
+class TestUpsertPushSubscription:
+    @pytest.mark.asyncio
+    async def test_calls_prisma_upsert_with_correct_params(self, mock_prisma):
+        mock_prisma.upsert.return_value = MagicMock()
+
+        await push_subscription.upsert_push_subscription(
+            user_id="user-1",
+            endpoint="https://push.example.com/sub/1",
+            p256dh="test-p256dh",
+            auth="test-auth",
+            user_agent="Mozilla/5.0",
+        )
+
+        mock_prisma.upsert.assert_awaited_once()
+        call_kwargs = mock_prisma.upsert.call_args.kwargs
+        assert call_kwargs["where"] == {
+            "userId_endpoint": {
+                "userId": "user-1",
+                "endpoint": "https://push.example.com/sub/1",
+            }
+        }
+        assert call_kwargs["data"]["create"] == {
+            "userId": "user-1",
+            "endpoint": "https://push.example.com/sub/1",
+            "p256dh": "test-p256dh",
+            "auth": "test-auth",
+            "userAgent": "Mozilla/5.0",
+        }
+        assert call_kwargs["data"]["update"] == {
+            "p256dh": "test-p256dh",
+            "auth": "test-auth",
+            "userAgent": "Mozilla/5.0",
+            "failCount": 0,
+            "lastFailedAt": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_upsert_without_user_agent(self, mock_prisma):
+        mock_prisma.upsert.return_value = MagicMock()
+
+        await push_subscription.upsert_push_subscription(
+            user_id="user-1",
+            endpoint="https://push.example.com/sub/1",
+            p256dh="test-p256dh",
+            auth="test-auth",
+        )
+
+        call_kwargs = mock_prisma.upsert.call_args.kwargs
+        assert call_kwargs["data"]["create"]["userAgent"] is None
+        assert call_kwargs["data"]["update"]["userAgent"] is None
+
+    @pytest.mark.asyncio
+    async def test_upsert_returns_prisma_result(self, mock_prisma):
+        expected = MagicMock()
+        mock_prisma.upsert.return_value = expected
+
+        result = await push_subscription.upsert_push_subscription(
+            user_id="user-1",
+            endpoint="https://push.example.com/sub/1",
+            p256dh="test-p256dh",
+            auth="test-auth",
+        )
+
+        assert result is expected
+
+    @pytest.mark.asyncio
+    async def test_upsert_resets_fail_count_on_update(self, mock_prisma):
+        mock_prisma.upsert.return_value = MagicMock()
+
+        await push_subscription.upsert_push_subscription(
+            user_id="user-1",
+            endpoint="https://push.example.com/sub/1",
+            p256dh="test-p256dh",
+            auth="test-auth",
+        )
+
+        call_kwargs = mock_prisma.upsert.call_args.kwargs
+        assert call_kwargs["data"]["update"]["failCount"] == 0
+        assert call_kwargs["data"]["update"]["lastFailedAt"] is None
+
+
+class TestGetUserPushSubscriptions:
+    @pytest.mark.asyncio
+    async def test_returns_list_of_subscriptions(self, mock_prisma):
+        sub1 = MagicMock()
+        sub2 = MagicMock()
+        mock_prisma.find_many.return_value = [sub1, sub2]
+
+        result = await push_subscription.get_user_push_subscriptions("user-1")
+
+        assert result == [sub1, sub2]
+        mock_prisma.find_many.assert_awaited_once_with(where={"userId": "user-1"})
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_subscriptions(self, mock_prisma):
+        mock_prisma.find_many.return_value = []
+
+        result = await push_subscription.get_user_push_subscriptions("user-1")
+
+        assert result == []
+
+
+class TestDeletePushSubscription:
+    @pytest.mark.asyncio
+    async def test_deletes_by_user_id_and_endpoint(self, mock_prisma):
+        await push_subscription.delete_push_subscription(
+            "user-1",
+            "https://push.example.com/sub/1",
+        )
+
+        mock_prisma.delete_many.assert_awaited_once_with(
+            where={
+                "userId": "user-1",
+                "endpoint": "https://push.example.com/sub/1",
+            }
+        )
+
+
+class TestDeletePushSubscriptionByEndpoint:
+    @pytest.mark.asyncio
+    async def test_includes_user_id_in_where(self, mock_prisma):
+        await push_subscription.delete_push_subscription_by_endpoint(
+            "user-1",
+            "https://push.example.com/sub/1",
+        )
+
+        mock_prisma.delete_many.assert_awaited_once_with(
+            where={
+                "userId": "user-1",
+                "endpoint": "https://push.example.com/sub/1",
+            }
+        )
+
+
+class TestIncrementFailCount:
+    @pytest.mark.asyncio
+    async def test_includes_user_id_in_where(self, mock_prisma):
+        await push_subscription.increment_fail_count(
+            "user-1",
+            "https://push.example.com/sub/1",
+        )
+
+        mock_prisma.update_many.assert_awaited_once()
+        call_kwargs = mock_prisma.update_many.call_args.kwargs
+        assert call_kwargs["where"] == {
+            "userId": "user-1",
+            "endpoint": "https://push.example.com/sub/1",
+        }
+
+    @pytest.mark.asyncio
+    async def test_increments_fail_count_by_one(self, mock_prisma):
+        await push_subscription.increment_fail_count(
+            "user-1",
+            "https://push.example.com/sub/1",
+        )
+
+        call_kwargs = mock_prisma.update_many.call_args.kwargs
+        assert call_kwargs["data"]["failCount"] == {"increment": 1}
+
+    @pytest.mark.asyncio
+    async def test_sets_last_failed_at_to_utc_now(self, mock_prisma):
+        await push_subscription.increment_fail_count(
+            "user-1",
+            "https://push.example.com/sub/1",
+        )
+
+        call_kwargs = mock_prisma.update_many.call_args.kwargs
+        last_failed = call_kwargs["data"]["lastFailedAt"]
+        assert isinstance(last_failed, datetime)
+        assert last_failed.tzinfo is not None
+
+
+class TestCleanupFailedSubscriptions:
+    @pytest.mark.asyncio
+    async def test_deletes_subscriptions_exceeding_threshold(self, mock_prisma):
+        mock_prisma.delete_many.return_value = 3
+
+        result = await push_subscription.cleanup_failed_subscriptions(
+            max_failures=5,
+        )
+
+        assert result == 3
+        mock_prisma.delete_many.assert_awaited_once_with(
+            where={"failCount": {"gte": 5}}
+        )
+
+    @pytest.mark.asyncio
+    async def test_uses_default_max_failures(self, mock_prisma):
+        mock_prisma.delete_many.return_value = 0
+
+        await push_subscription.cleanup_failed_subscriptions()
+
+        call_kwargs = mock_prisma.delete_many.call_args.kwargs
+        assert call_kwargs["where"]["failCount"]["gte"] == 5
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_none_deleted(self, mock_prisma):
+        mock_prisma.delete_many.return_value = 0
+
+        result = await push_subscription.cleanup_failed_subscriptions()
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_result_is_none(self, mock_prisma):
+        mock_prisma.delete_many.return_value = None
+
+        result = await push_subscription.cleanup_failed_subscriptions()
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_custom_max_failures_threshold(self, mock_prisma):
+        mock_prisma.delete_many.return_value = 1
+
+        result = await push_subscription.cleanup_failed_subscriptions(
+            max_failures=10,
+        )
+
+        assert result == 1
+        call_kwargs = mock_prisma.delete_many.call_args.kwargs
+        assert call_kwargs["where"]["failCount"]["gte"] == 10
