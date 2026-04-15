@@ -1,9 +1,11 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useLoadMoreMessages } from "../useLoadMoreMessages";
 
+const mockGetV2GetSession = vi.fn();
+
 vi.mock("@/app/api/__generated__/endpoints/chat/chat", () => ({
-  getV2GetSession: vi.fn(),
+  getV2GetSession: (...args: unknown[]) => mockGetV2GetSession(...args),
 }));
 
 vi.mock("../helpers/convertChatSessionToUiMessages", () => ({
@@ -19,6 +21,23 @@ const BASE_ARGS = {
   forwardPaginated: true,
   initialPageRawMessages: [],
 };
+
+function makeSuccessResponse(overrides: {
+  messages?: unknown[];
+  has_more_messages?: boolean;
+  oldest_sequence?: number;
+  newest_sequence?: number;
+}) {
+  return {
+    status: 200,
+    data: {
+      messages: overrides.messages ?? [],
+      has_more_messages: overrides.has_more_messages ?? false,
+      oldest_sequence: overrides.oldest_sequence ?? 0,
+      newest_sequence: overrides.newest_sequence ?? 49,
+    },
+  };
+}
 
 describe("useLoadMoreMessages", () => {
   beforeEach(() => {
@@ -73,5 +92,175 @@ describe("useLoadMoreMessages", () => {
     expect(result.current.pagedMessages).toHaveLength(0);
     expect(result.current.hasMore).toBe(false);
     expect(result.current.isLoadingMore).toBe(false);
+  });
+
+  describe("loadMore — forward pagination", () => {
+    it("calls getV2GetSession with after_sequence and updates newestSequence", async () => {
+      const rawMsg = { role: "user", content: "hi", sequence: 50 };
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: [rawMsg],
+          has_more_messages: true,
+          newest_sequence: 99,
+        }),
+      );
+
+      const { result } = renderHook(() =>
+        useLoadMoreMessages({ ...BASE_ARGS, forwardPaginated: true }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(mockGetV2GetSession).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ after_sequence: 49 }),
+      );
+      expect(result.current.hasMore).toBe(true);
+      expect(result.current.isLoadingMore).toBe(false);
+    });
+
+    it("sets hasMore=false when response has no more messages", async () => {
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({ has_more_messages: false }),
+      );
+
+      const { result } = renderHook(() =>
+        useLoadMoreMessages({ ...BASE_ARGS, forwardPaginated: true }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(result.current.hasMore).toBe(false);
+    });
+
+    it("is a no-op when hasMore is false", async () => {
+      const { result } = renderHook(() =>
+        useLoadMoreMessages({
+          ...BASE_ARGS,
+          initialHasMore: false,
+          forwardPaginated: true,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(mockGetV2GetSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("loadMore — backward pagination", () => {
+    it("calls getV2GetSession with before_sequence", async () => {
+      mockGetV2GetSession.mockResolvedValueOnce(
+        makeSuccessResponse({
+          messages: [{ role: "user", content: "old", sequence: 0 }],
+          has_more_messages: false,
+          oldest_sequence: 0,
+        }),
+      );
+
+      const { result } = renderHook(() =>
+        useLoadMoreMessages({
+          ...BASE_ARGS,
+          forwardPaginated: false,
+          initialOldestSequence: 50,
+        }),
+      );
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      expect(mockGetV2GetSession).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({ before_sequence: 50 }),
+      );
+      expect(result.current.hasMore).toBe(false);
+    });
+  });
+
+  describe("loadMore — error handling", () => {
+    it("does not set hasMore=false on first error", async () => {
+      mockGetV2GetSession.mockRejectedValueOnce(new Error("network error"));
+
+      const { result } = renderHook(() => useLoadMoreMessages(BASE_ARGS));
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // First error — hasMore still true
+      expect(result.current.hasMore).toBe(true);
+      expect(result.current.isLoadingMore).toBe(false);
+    });
+
+    it("sets hasMore=false after MAX_CONSECUTIVE_ERRORS (3) errors", async () => {
+      mockGetV2GetSession.mockRejectedValue(new Error("network error"));
+
+      const { result } = renderHook(() => useLoadMoreMessages(BASE_ARGS));
+
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          await result.current.loadMore();
+        });
+        // Reset the in-flight guard between calls
+        await waitFor(() => expect(result.current.isLoadingMore).toBe(false));
+      }
+
+      expect(result.current.hasMore).toBe(false);
+    });
+
+    it("ignores non-200 response and increments error count", async () => {
+      mockGetV2GetSession.mockResolvedValueOnce({ status: 500, data: {} });
+
+      const { result } = renderHook(() => useLoadMoreMessages(BASE_ARGS));
+
+      await act(async () => {
+        await result.current.loadMore();
+      });
+
+      // One error, not yet at threshold — hasMore still true
+      expect(result.current.hasMore).toBe(true);
+      expect(result.current.isLoadingMore).toBe(false);
+    });
+  });
+
+  describe("loadMore — epoch / stale-response guard", () => {
+    it("discards response when epoch changes during flight (resetPaged called)", async () => {
+      let resolveRequest!: (v: unknown) => void;
+      mockGetV2GetSession.mockReturnValueOnce(
+        new Promise((res) => {
+          resolveRequest = res;
+        }),
+      );
+
+      const { result } = renderHook(() => useLoadMoreMessages(BASE_ARGS));
+
+      // Start the request without awaiting
+      act(() => {
+        result.current.loadMore();
+      });
+
+      // Reset epoch mid-flight
+      act(() => {
+        result.current.resetPaged();
+      });
+
+      // Now resolve the in-flight request
+      await act(async () => {
+        resolveRequest(
+          makeSuccessResponse({ messages: [{ role: "user", content: "hi" }] }),
+        );
+      });
+
+      // Response discarded — pagedMessages stays empty, isLoadingMore stays false
+      expect(result.current.pagedMessages).toHaveLength(0);
+      expect(result.current.isLoadingMore).toBe(false);
+    });
   });
 });

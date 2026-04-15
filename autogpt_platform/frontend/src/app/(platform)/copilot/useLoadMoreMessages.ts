@@ -198,6 +198,9 @@ export function useLoadMoreMessages({
     // The useEffect will restore hasMore from the parent after the refetch
     // completes and forwardPaginated switches to false.
     setHasMore(false);
+    // Clear the loading state so the spinner doesn't stay stuck if a loadMore
+    // was in flight when resetPaged was called.
+    setIsLoadingMore(false);
     isLoadingMoreRef.current = false;
     consecutiveErrorsRef.current = 0;
     epochRef.current += 1;
