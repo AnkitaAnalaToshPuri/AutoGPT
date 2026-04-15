@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend.copilot.transcript import (
-    CliSessionRestore,
+    TranscriptDownload,
     _flatten_assistant_content,
     _flatten_tool_result_content,
     _messages_to_transcript,
@@ -997,16 +997,16 @@ def _make_sdk_patches(
             dict(new_callable=AsyncMock, return_value=("system prompt", None)),
         ),
         (
-            f"{_SVC}.restore_cli_session",
+            f"{_SVC}.download_transcript",
             dict(
                 new_callable=AsyncMock,
-                return_value=CliSessionRestore(
-                    content=original_transcript.encode("utf-8"), message_count=2
+                return_value=TranscriptDownload(
+                    content=original_transcript.encode("utf-8"), message_count=2, mode="sdk"
                 ),
             ),
         ),
         (f"{_SVC}.strip_for_upload", dict(return_value=original_transcript)),
-        (f"{_SVC}.upload_cli_session", dict(new_callable=AsyncMock)),
+        (f"{_SVC}.upload_transcript", dict(new_callable=AsyncMock)),
         (f"{_SVC}.validate_transcript", dict(return_value=True)),
         (
             f"{_SVC}.compact_transcript",
@@ -1913,14 +1913,14 @@ class TestStreamChatCompletionRetryIntegration:
             compacted_transcript=None,
             client_side_effect=_client_factory,
         )
-        # Override restore_cli_session to return None (CLI native session unavailable)
+        # Override download_transcript to return None (CLI native session unavailable)
         patches = [
             (
                 (
-                    f"{_SVC}.restore_cli_session",
+                    f"{_SVC}.download_transcript",
                     dict(new_callable=AsyncMock, return_value=None),
                 )
-                if p[0] == f"{_SVC}.restore_cli_session"
+                if p[0] == f"{_SVC}.download_transcript"
                 else p
             )
             for p in patches
@@ -1943,7 +1943,7 @@ class TestStreamChatCompletionRetryIntegration:
         # captured_options holds {"options": ClaudeAgentOptions}, so check
         # the attribute directly rather than dict keys.
         assert not getattr(captured_options.get("options"), "resume", None), (
-            f"--resume was set even though restore_cli_session returned False: "
+            f"--resume was set even though download_transcript returned None: "
             f"{captured_options}"
         )
         assert any(isinstance(e, StreamStart) for e in events)

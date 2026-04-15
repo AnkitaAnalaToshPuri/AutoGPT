@@ -93,15 +93,17 @@ from ..tools.sandbox import WORKSPACE_PREFIX, make_session_path
 from ..tracking import track_user_message
 from ..transcript import (
     _run_compression,
-    CliSessionRestore,
+    TranscriptDownload,
+    TranscriptMode,
     cleanup_stale_project_dirs,
     cli_session_path,
     compact_transcript,
+    detect_gap,
+    download_transcript,
     projects_base,
     read_compacted_entries,
-    restore_cli_session,
     strip_for_upload,
-    upload_cli_session,
+    upload_transcript,
     validate_transcript,
 )
 from ..transcript_builder import TranscriptBuilder
@@ -947,7 +949,7 @@ def _read_cli_session_from_disk(
 
 
 def _process_cli_restore(
-    cli_restore: CliSessionRestore,
+    cli_restore: TranscriptDownload,
     sdk_cwd: str,
     session_id: str,
     log_prefix: str,
@@ -2600,7 +2602,7 @@ async def stream_chat_completion_sdk(
         transcript_msg_count = 0
         if config.claude_agent_use_resume and user_id and len(session.messages) > 1:
             try:
-                cli_restore = await restore_cli_session(
+                cli_restore = await download_transcript(
                     user_id, session_id, log_prefix=log_prefix
                 )
             except Exception as restore_err:
@@ -2608,6 +2610,17 @@ async def stream_chat_completion_sdk(
                     "%s CLI session restore failed, continuing without --resume: %s",
                     log_prefix,
                     restore_err,
+                )
+                cli_restore = None
+
+            # Only attempt --resume for SDK-written transcripts.
+            # Baseline-written transcripts use TranscriptBuilder format (synthetic IDs,
+            # stripped fields) that may not be valid for --resume.
+            if cli_restore is not None and cli_restore.mode != "sdk":
+                logger.info(
+                    "%s Transcript written by mode=%r, skipping --resume — will reconstruct from DB",
+                    log_prefix,
+                    cli_restore.mode,
                 )
                 cli_restore = None
 
@@ -3529,11 +3542,12 @@ async def stream_chat_completion_sdk(
                 )
                 if _cli_content:
                     await asyncio.shield(
-                        upload_cli_session(
+                        upload_transcript(
                             user_id=user_id,
                             session_id=session_id,
                             content=_cli_content,
                             message_count=len(session.messages),
+                            mode="sdk",
                             log_prefix=log_prefix,
                         )
                     )

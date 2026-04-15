@@ -7,7 +7,7 @@ import pytest
 from .model import create_chat_session, get_chat_session, upsert_chat_session
 from .response_model import StreamError, StreamTextDelta
 from .sdk import service as sdk_service
-from .transcript import restore_cli_session
+from .transcript import download_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ async def test_sdk_resume_multi_turn(setup_test_user, test_user_id):
     cli_session = None
     for _ in range(10):
         await asyncio.sleep(0.5)
-        cli_session = await restore_cli_session(test_user_id, session.session_id)
+        cli_session = await download_transcript(test_user_id, session.session_id)
         if cli_session:
             break
     if not cli_session:

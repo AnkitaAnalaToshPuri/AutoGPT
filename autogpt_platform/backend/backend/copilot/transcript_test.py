@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 from backend.util import json
 
 from .transcript import (
-    CliSessionRestore,
+    TranscriptDownload,
     _build_path_from_parts,
     _find_last_assistant_entry,
     _flatten_assistant_content,
@@ -720,7 +720,7 @@ class TestUploadCliSession:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import upload_cli_session
+        from .transcript import upload_transcript
 
         mock_storage = AsyncMock()
         content = b'{"type":"assistant"}\n'
@@ -731,7 +731,7 @@ class TestUploadCliSession:
             return_value=mock_storage,
         ):
             asyncio.run(
-                upload_cli_session(
+                upload_transcript(
                     user_id="user-1",
                     session_id="12345678-0000-0000-0000-000000000001",
                     content=content,
@@ -742,12 +742,12 @@ class TestUploadCliSession:
         assert mock_storage.store.call_count == 2
 
     def test_uploads_companion_meta_json_with_message_count(self):
-        """upload_cli_session stores a companion .meta.json with message_count."""
+        """upload_transcript stores a companion .meta.json with message_count."""
         import asyncio
         import json
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import upload_cli_session
+        from .transcript import upload_transcript
 
         mock_storage = AsyncMock()
         content = b'{"type":"assistant"}\n'
@@ -758,7 +758,7 @@ class TestUploadCliSession:
             return_value=mock_storage,
         ):
             asyncio.run(
-                upload_cli_session(
+                upload_transcript(
                     user_id="user-1",
                     session_id="12345678-0000-0000-0000-000000000010",
                     content=content,
@@ -781,7 +781,7 @@ class TestUploadCliSession:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import upload_cli_session
+        from .transcript import upload_transcript
 
         mock_storage = AsyncMock()
         mock_storage.store.side_effect = [RuntimeError("gcs unavailable"), None]
@@ -794,7 +794,7 @@ class TestUploadCliSession:
         ):
             # Should not raise — failures are logged as warnings
             asyncio.run(
-                upload_cli_session(
+                upload_transcript(
                     user_id="user-1",
                     session_id="12345678-0000-0000-0000-000000000002",
                     content=content,
@@ -810,7 +810,7 @@ class TestRestoreCliSession:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import restore_cli_session
+        from .transcript import download_transcript
 
         mock_storage = AsyncMock()
         mock_storage.retrieve.side_effect = [
@@ -824,7 +824,7 @@ class TestRestoreCliSession:
             return_value=mock_storage,
         ):
             result = asyncio.run(
-                restore_cli_session(
+                download_transcript(
                     user_id="user-1",
                     session_id="12345678-0000-0000-0000-000000000000",
                 )
@@ -832,12 +832,12 @@ class TestRestoreCliSession:
 
         assert result is None
 
-    def test_returns_cli_session_restore_on_success_no_meta(self):
-        """Happy path with no meta.json: returns CliSessionRestore with message_count=0."""
+    def test_returns_transcript_download_on_success_no_meta(self):
+        """Happy path with no meta.json: returns TranscriptDownload with message_count=0."""
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import restore_cli_session
+        from .transcript import download_transcript
 
         session_id = "12345678-0000-0000-0000-000000000003"
         content = b'{"type":"assistant"}\n'
@@ -851,27 +851,28 @@ class TestRestoreCliSession:
             return_value=mock_storage,
         ):
             result = asyncio.run(
-                restore_cli_session(
+                download_transcript(
                     user_id="user-1",
                     session_id=session_id,
                 )
             )
 
-        assert isinstance(result, CliSessionRestore)
+        assert isinstance(result, TranscriptDownload)
         assert result.content == content
         assert result.message_count == 0
+        assert result.mode == "sdk"
 
-    def test_returns_cli_session_restore_with_message_count_from_meta(self):
-        """When meta.json is present, message_count is read from it."""
+    def test_returns_transcript_download_with_message_count_from_meta(self):
+        """When meta.json is present, message_count and mode are read from it."""
         import asyncio
         import json
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import restore_cli_session
+        from .transcript import download_transcript
 
         session_id = "12345678-0000-0000-0000-000000000005"
         content = b'{"type":"assistant"}\n'
-        meta_bytes = json.dumps({"message_count": 7, "uploaded_at": 1234567.0}).encode()
+        meta_bytes = json.dumps({"message_count": 7, "mode": "sdk", "uploaded_at": 1234567.0}).encode()
 
         mock_storage = AsyncMock()
         mock_storage.retrieve.side_effect = [content, meta_bytes]
@@ -882,22 +883,23 @@ class TestRestoreCliSession:
             return_value=mock_storage,
         ):
             result = asyncio.run(
-                restore_cli_session(
+                download_transcript(
                     user_id="user-1",
                     session_id=session_id,
                 )
             )
 
-        assert isinstance(result, CliSessionRestore)
+        assert isinstance(result, TranscriptDownload)
         assert result.content == content
         assert result.message_count == 7
+        assert result.mode == "sdk"
 
     def test_returns_none_on_download_exception(self):
         """Non-FileNotFoundError during retrieve logs warning and returns None."""
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from .transcript import restore_cli_session
+        from .transcript import download_transcript
 
         mock_storage = AsyncMock()
         mock_storage.retrieve.side_effect = [
@@ -911,7 +913,7 @@ class TestRestoreCliSession:
             return_value=mock_storage,
         ):
             result = asyncio.run(
-                restore_cli_session(
+                download_transcript(
                     user_id="user-1",
                     session_id="12345678-0000-0000-0000-000000000004",
                 )

@@ -20,12 +20,16 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from backend.util import json
 from backend.util.clients import get_openai_client
 from backend.util.prompt import CompressResult, compress_context
 from backend.util.workspace_storage import GCSWorkspaceStorage, get_workspace_storage
+
+if TYPE_CHECKING:
+    from backend.copilot.model import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +48,14 @@ STRIPPABLE_TYPES = frozenset(
 )
 
 
-@dataclass
-class CliSessionRestore:
-    """Result of restoring the CLI native session file."""
+TranscriptMode = Literal["sdk", "baseline"]
 
-    content: bytes  # raw bytes written to disk (for builder seeding)
-    message_count: int = 0  # watermark from companion .meta.json
+
+@dataclass
+class TranscriptDownload:
+    content: bytes
+    message_count: int = 0
+    mode: TranscriptMode = "sdk"  # "sdk" = Claude CLI native, "baseline" = TranscriptBuilder
 
 
 # Storage prefix for the CLI's native session JSONL files (for cross-pod --resume).
@@ -661,11 +667,12 @@ def _cli_session_meta_path_parts(user_id: str, session_id: str) -> tuple[str, st
     )
 
 
-async def upload_cli_session(
+async def upload_transcript(
     user_id: str,
     session_id: str,
     content: bytes,
     message_count: int = 0,
+    mode: TranscriptMode = "sdk",
     log_prefix: str = "[Transcript]",
 ) -> None:
     """Upload CLI session content to GCS with companion meta.json.
@@ -674,7 +681,7 @@ async def upload_cli_session(
     the session file from disk before calling this function.
 
     Also uploads a companion .meta.json with the message_count watermark so
-    restore_cli_session can return it without a separate fetch.
+    download_transcript can return it without a separate fetch.
 
     Called after each turn so the next turn can restore the file on any pod
     (eliminating the pod-affinity requirement for --resume).
@@ -682,7 +689,7 @@ async def upload_cli_session(
     storage = await get_workspace_storage()
     wid, fid, fname = _cli_session_storage_path_parts(user_id, session_id)
     mwid, mfid, mfname = _cli_session_meta_path_parts(user_id, session_id)
-    meta = {"message_count": message_count, "uploaded_at": time.time()}
+    meta = {"message_count": message_count, "mode": mode, "uploaded_at": time.time()}
     meta_encoded = json.dumps(meta).encode("utf-8")
 
     session_result, meta_result = await asyncio.gather(
@@ -709,18 +716,18 @@ async def upload_cli_session(
     )
 
 
-async def restore_cli_session(
+async def download_transcript(
     user_id: str,
     session_id: str,
     log_prefix: str = "[Transcript]",
-) -> CliSessionRestore | None:
-    """Download CLI session from GCS. Returns content + message_count, or None if not found.
+) -> TranscriptDownload | None:
+    """Download CLI session from GCS. Returns content + message_count + mode, or None if not found.
 
     Pure GCS operation — no disk I/O.  The caller is responsible for writing
     content to disk if --resume is needed.
 
-    Returns a CliSessionRestore with the raw content and message_count watermark
-    on success, or None if not available (first turn or upload failed).
+    Returns a TranscriptDownload with the raw content, message_count watermark,
+    and mode on success, or None if not available (first turn or upload failed).
     """
     storage = await get_workspace_storage()
     path = _build_path_from_parts(
@@ -747,15 +754,18 @@ async def restore_cli_session(
 
     content: bytes = content_result
 
-    # Parse message_count from companion meta — best-effort, default to 0.
+    # Parse message_count and mode from companion meta — best-effort, defaults.
     message_count = 0
+    mode: TranscriptMode = "sdk"
     if isinstance(meta_result, FileNotFoundError):
-        pass  # No meta — first upload or old version; default to 0
+        pass  # No meta — old upload; default to "sdk"
     elif isinstance(meta_result, BaseException):
         logger.debug("%s Failed to load CLI session meta: %s", log_prefix, meta_result)
     else:
         meta = json.loads(meta_result.decode("utf-8"), fallback={})
         message_count = meta.get("message_count", 0)
+        raw_mode = meta.get("mode", "sdk")
+        mode = raw_mode if raw_mode in ("sdk", "baseline") else "sdk"
 
     logger.info(
         "%s Downloaded CLI session (%dB, msg_count=%d)",
@@ -763,7 +773,29 @@ async def restore_cli_session(
         len(content),
         message_count,
     )
-    return CliSessionRestore(content=content, message_count=message_count)
+    return TranscriptDownload(content=content, message_count=message_count, mode=mode)
+
+
+def detect_gap(
+    download: TranscriptDownload,
+    session_messages: list[ChatMessage],
+) -> list[ChatMessage]:
+    """Return chat-db messages after the transcript watermark (excluding current user turn).
+
+    Returns [] if transcript is current, watermark is zero, or the watermark
+    position doesn't end on an assistant turn (misaligned watermark).
+    """
+    if download.message_count == 0:
+        return []
+    wm = download.message_count
+    total = len(session_messages)
+    if wm >= total - 1:
+        return []
+    # Sanity: position wm-1 should be an assistant turn; misaligned watermark
+    # means the DB messages shifted (e.g. deletion) — skip gap to avoid wrong context.
+    if session_messages[wm - 1].role != "assistant":
+        return []
+    return list(session_messages[wm : total - 1])
 
 
 async def delete_transcript(user_id: str, session_id: str) -> None:

@@ -66,10 +66,11 @@ from backend.copilot.tracking import track_user_message
 from backend.copilot.transcript import (
     STOP_REASON_END_TURN,
     STOP_REASON_TOOL_USE,
-    CliSessionRestore,
-    restore_cli_session,
+    TranscriptDownload,
+    detect_gap,
+    download_transcript,
     strip_for_upload,
-    upload_cli_session,
+    upload_transcript,
     validate_transcript,
 )
 from backend.copilot.transcript_builder import TranscriptBuilder
@@ -713,21 +714,61 @@ def should_upload_transcript(
     return bool(user_id) and transcript_covers_prefix
 
 
+def _append_gap_to_builder(
+    gap: list[ChatMessage],
+    builder: TranscriptBuilder,
+) -> None:
+    """Append gap messages from chat-db into the TranscriptBuilder.
+
+    Converts ChatMessage (OpenAI format) to TranscriptBuilder entries
+    (Claude CLI JSONL format) so the uploaded transcript covers all turns.
+    """
+    import orjson
+
+    for msg in gap:
+        if msg.role == "user":
+            builder.append_user(msg.content or "")
+        elif msg.role == "assistant":
+            content_blocks: list[dict] = []
+            if msg.content:
+                content_blocks.append({"type": "text", "text": msg.content})
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    try:
+                        input_data = orjson.loads(fn.get("arguments", "{}"))
+                    except Exception:
+                        input_data = {}
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": tc.get("id", "") if isinstance(tc, dict) else "",
+                        "name": fn.get("name", "unknown"),
+                        "input": input_data,
+                    })
+            if content_blocks:
+                builder.append_assistant(content_blocks=content_blocks)
+        elif msg.role == "tool" and msg.tool_call_id:
+            builder.append_tool_result(
+                tool_use_id=msg.tool_call_id,
+                content=msg.content or "",
+            )
+
+
 async def _load_prior_transcript(
     user_id: str,
     session_id: str,
-    session_msg_count: int,
+    session_messages: list[ChatMessage],
     transcript_builder: TranscriptBuilder,
 ) -> bool:
     """Download and load the prior CLI session into ``transcript_builder``.
 
     Returns ``True`` when the loaded session fully covers the session
-    prefix; ``False`` otherwise (stale, missing, invalid, or download
-    error).  Callers should suppress uploads when this returns ``False``
-    to avoid overwriting a more complete version in storage.
+    prefix; ``False`` otherwise (missing, invalid, or download error).
+    Callers should suppress uploads when this returns ``False`` to avoid
+    overwriting a more complete version in storage.
     """
     try:
-        restore = await restore_cli_session(
+        restore = await download_transcript(
             user_id, session_id, log_prefix="[Baseline]"
         )
     except Exception as e:
@@ -749,20 +790,22 @@ async def _load_prior_transcript(
         logger.warning("[Baseline] CLI session content invalid after strip")
         return False
 
-    if restore.message_count > 0 and restore.message_count < session_msg_count - 1:
-        logger.warning(
-            "[Baseline] Session stale: covers %d of %d messages, skipping",
-            restore.message_count,
-            session_msg_count,
-        )
-        return False
-
     transcript_builder.load_previous(stripped, log_prefix="[Baseline]")
     logger.info(
         "[Baseline] Loaded CLI session: %dB, msg_count=%d",
         len(restore.content),
         restore.message_count,
     )
+
+    gap = detect_gap(restore, session_messages)
+    if gap:
+        _append_gap_to_builder(gap, transcript_builder)
+        logger.info(
+            "[Baseline] Filled gap: loaded %d transcript msgs + %d gap msgs from DB",
+            restore.message_count,
+            len(gap),
+        )
+
     return True
 
 
@@ -794,11 +837,12 @@ async def _upload_final_transcript(
         # orphaned coroutine; shield it so cancellation of this caller doesn't
         # abort the in-flight GCS write.
         upload_task = asyncio.create_task(
-            upload_cli_session(
+            upload_transcript(
                 user_id=user_id,
                 session_id=session_id,
                 content=content.encode("utf-8"),
                 message_count=session_msg_count,
+                mode="baseline",
                 log_prefix="[Baseline]",
             )
         )
@@ -911,7 +955,7 @@ async def stream_chat_completion_baseline(
             _load_prior_transcript(
                 user_id=user_id,
                 session_id=session_id,
-                session_msg_count=len(session.messages),
+                session_messages=session.messages,
                 transcript_builder=transcript_builder,
             ),
             prompt_task,
