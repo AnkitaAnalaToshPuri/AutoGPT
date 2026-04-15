@@ -398,10 +398,12 @@ jobs:
             👋 Closing this PR due to unsigned CLA after ${CLOSE_DAYS} days.
             
             Thank you for your contribution! If you'd still like to contribute:
-            
+
             1. [Sign the CLA](${CLA_SIGN_URL})
             2. Re-open this PR or create a new one
-            
+
+            > **Maintainers:** To reopen and exempt from future auto-close, add the \`cla: override\` label before reopening. Without it, the PR will not be re-closed automatically (a reopened PR is treated as a maintainer decision).
+
             We appreciate your interest in AutoGPT and hope to see you back! 🚀`
                         });
                         
