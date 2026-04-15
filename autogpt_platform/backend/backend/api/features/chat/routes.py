@@ -543,7 +543,7 @@ async def get_session(
         _strip_injected_context(message.model_dump()) for message in page.messages
     ]
 
-    logger.info(
+    logger.debug(
         "[GET_SESSION] session=%s, active=%s, from_start=%s, forward_paginated=%s, "
         "msg_count=%d, last_role=%s",
         session_id,

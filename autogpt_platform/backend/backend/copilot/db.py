@@ -30,6 +30,8 @@ from .model import get_chat_session as get_chat_session_cached
 
 logger = logging.getLogger(__name__)
 
+_BOUNDARY_SCAN_LIMIT = 10
+
 
 class PaginatedMessages(BaseModel):
     """Result of a paginated message query."""
@@ -124,7 +126,6 @@ async def get_chat_messages_paginated(
         # expand backward to include the preceding assistant message that
         # owns the tool_calls, so convertChatSessionMessagesToUiMessages
         # can pair them correctly.
-        _BOUNDARY_SCAN_LIMIT = 10
         if results and results[0].role == "tool":
             boundary_where: dict[str, Any] = {
                 "sessionId": session_id,
