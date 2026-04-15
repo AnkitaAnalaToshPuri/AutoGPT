@@ -131,11 +131,16 @@ function LoadMoreSentinel({
   isLoading,
   messageCount,
   onLoadMore,
+  rootMargin = "200px 0px 0px 0px",
 }: {
   hasMore: boolean;
   isLoading: boolean;
   messageCount: number;
   onLoadMore: () => void;
+  /** IntersectionObserver rootMargin. Top sentinel uses "200px 0px 0px 0px"
+   *  (pre-trigger when approaching from above); bottom sentinel should use
+   *  "0px 0px 200px 0px" (pre-trigger when approaching from below). */
+  rootMargin?: string;
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const onLoadMoreRef = useRef(onLoadMore);
@@ -170,11 +175,11 @@ function LoadMoreSentinel({
         }
         onLoadMoreRef.current();
       },
-      { rootMargin: "200px 0px 0px 0px" },
+      { rootMargin },
     );
     observer.observe(sentinelRef.current);
     return () => observer.disconnect();
-  }, [hasMore, isLoading, scrollRef]);
+  }, [hasMore, isLoading, rootMargin, scrollRef]);
 
   // After React commits new DOM nodes (prepended messages), adjust
   // scrollTop so the user stays at the same visual position.
@@ -453,6 +458,7 @@ export function ChatMessagesContainer({
             isLoading={!!isLoadingMore}
             messageCount={messages.length}
             onLoadMore={onLoadMore}
+            rootMargin="0px 0px 200px 0px"
           />
         )}
       </ConversationContent>
