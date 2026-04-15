@@ -946,7 +946,7 @@ async def stream_chat_post(
         # there would reopen the infra-retry duplicate window. The 30 s TTL
         # is the fallback. All other exits (normal finish, early return, error)
         # should release so the user can re-send the same message.
-        release_dedup_on_exit = True
+        release_dedup_lock_on_exit = True
         try:
             # Subscribe from the position we captured before enqueuing
             # This avoids replaying old messages while catching all new ones
@@ -1016,7 +1016,7 @@ async def stream_chat_post(
                     }
                 },
             )
-            release_dedup_on_exit = False
+            release_dedup_lock_on_exit = False
         except Exception as e:
             elapsed = (time_module.perf_counter() - event_gen_start) * 1000
             logger.error(
@@ -1033,7 +1033,7 @@ async def stream_chat_post(
             yield StreamFinish().to_sse()
             # finally releases dedup_lock
         finally:
-            if dedup_lock and release_dedup_on_exit:
+            if dedup_lock and release_dedup_lock_on_exit:
                 await dedup_lock.release()
             # Unsubscribe when client disconnects or stream ends
             if subscriber_queue is not None:
