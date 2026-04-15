@@ -2355,7 +2355,6 @@ class TestPR15MarketplaceOrg:
         ), "backend.data.graph should export a copy_graph function"
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="PR15: Creator view doesn't join org profile")
     async def test_creator_view_joins_org_profile(self):
         """The StoreCreator SQL view should join the Organization table
         to resolve org-level creator names and avatars."""
@@ -2363,7 +2362,7 @@ class TestPR15MarketplaceOrg:
         # the SQL view migration is applied.
         from prisma.models import StoreCreator
 
-        model_fields = {f.name for f in StoreCreator.model_fields.values()}  # type: ignore[attr-defined]
+        model_fields = set(StoreCreator.model_fields.keys())
         assert (
             "org_name" in model_fields
         ), "StoreCreator Prisma model should have org_name column"
