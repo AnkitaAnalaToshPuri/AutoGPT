@@ -354,6 +354,11 @@ class _StreamContext:
 # Index 0 = first retry, 1 = second retry; last value applies beyond that.
 _RETRY_TARGET_TOKENS: tuple[int, ...] = (50_000, 15_000)
 
+# Tight token budget for seeding the transcript builder on turns where no
+# CLI native session exists.  Kept below _RETRY_TARGET_TOKENS[0] so the
+# seeded JSONL upload stays compact and future gap injections are small.
+_SEED_TARGET_TOKENS: int = 30_000
+
 
 async def _reduce_context(
     transcript_content: str,
@@ -2614,8 +2619,6 @@ async def stream_chat_completion_sdk(
         # history, and (b) a restored CLI session on the next pod gets a
         # usable compact base even for sessions that started on old pods.
         # Seeding only makes sense when transcripts will actually be uploaded.
-        # Use a tight token budget (30K) so the seeded JSONL stays compact.
-        _SEED_TARGET_TOKENS = 30_000
         if (
             not use_resume
             and not transcript_content
