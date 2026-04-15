@@ -746,11 +746,12 @@ async def _resolve_model_and_multiplier(
         return sdk_model, _OPUS_COST_MULTIPLIER
 
     if model == "standard":
-        sdk_model = _normalize_model_name(config.model)
+        # Reset to config default — respects subscription mode (None = CLI default).
+        sdk_model = _resolve_sdk_model()
         logger.info(
             "[SDK] [%s] Per-request model override: standard (%s)",
             session_id[:12] if session_id else "?",
-            sdk_model,
+            sdk_model or "subscription-default",
         )
         return sdk_model, 1.0
 
