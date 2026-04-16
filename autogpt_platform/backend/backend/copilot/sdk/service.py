@@ -2607,8 +2607,6 @@ async def stream_chat_completion_sdk(
             'advanced' → Claude Opus; 'standard' → global config default.
             Takes priority over per-user LaunchDarkly targeting.
     """
-    _ = mode  # SDK path ignores the requested mode.
-
     if session is None:
         session = await get_chat_session(session_id, user_id)
 
@@ -2928,18 +2926,20 @@ async def stream_chat_completion_sdk(
             max_turns=config.claude_agent_max_turns,
             # max_budget_usd: per-query spend ceiling enforced by the CLI.
             max_budget_usd=config.claude_agent_max_budget_usd,
-            # max_thinking_tokens: cap extended thinking output per LLM call.
-            # Thinking tokens are billed at output rate ($75/M for Opus) and
-            # account for ~54% of total cost.  8192 is the default.
-            # Intentionally sent for all models including Sonnet — the CLI
-            # silently ignores this field for non-Opus models (those without
-            # native extended thinking), so it is safe to pass unconditionally.
-            max_thinking_tokens=config.claude_agent_max_thinking_tokens,
+            # thinking: specify extended thinking mode. Thinking tokens are billed
+            # at output rate ($75/M for Opus) and account for ~54% of total cost.
+            # The CLI silently ignores this field for models without native
+            # extended thinking, so it is safe to pass unconditionally.
+            # NOTE: Claude 4.7+ does not support capped thinking token budget:
+            # use `effort` instead to steer thinking effort.
+            thinking={"type": "adaptive"},
+            # effort: applies to models with extended thinking (Sonnet, Opus, Mythos).
+            effort=(
+                "medium"
+                if mode == "fast"
+                else (config.claude_agent_thinking_effort or "high")
+            ),
         )
-        # effort: only set for models with extended thinking (Opus).
-        # Setting effort on Sonnet causes <internal_reasoning> tag leaks.
-        if config.claude_agent_thinking_effort:
-            sdk_options.effort = config.claude_agent_thinking_effort
         if sdk_model:
             sdk_options.model = sdk_model
 

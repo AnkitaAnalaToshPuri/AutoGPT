@@ -180,6 +180,10 @@ class ChatConfig(BaseSettings):
         "Override via CHAT_CLAUDE_AGENT_MAX_BUDGET_USD env var.",
     )
     claude_agent_max_thinking_tokens: int = Field(
+        deprecated=(
+            "Setting a thinking token budget is not supported in Claude 4.7+. "
+            "Use `claude_agent_thinking_effort` instead to steer thinking effort."
+        ),
         default=8192,
         ge=1024,
         le=128000,
@@ -189,13 +193,17 @@ class ChatConfig(BaseSettings):
         "8192 is sufficient for most tasks; increase for complex reasoning.",
     )
     claude_agent_thinking_effort: Literal["low", "medium", "high", "max"] | None = (
+        # TODO: add xhigh when SDK support catches up
         Field(
             default=None,
-            description="Thinking effort level: 'low', 'medium', 'high', 'max', or None. "
-            "Only applies to models with extended thinking (Opus). "
-            "Sonnet doesn't have extended thinking — setting effort on Sonnet "
-            "can cause <internal_reasoning> tag leaks. "
-            "None = let the model decide. Override via CHAT_CLAUDE_AGENT_THINKING_EFFORT.",
+            description=(
+                "Thinking effort level: "
+                "'low', 'medium', 'high' (default), 'max', or None. "
+                "Only applies to models with extended thinking. "
+                "Check https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking "  # noqa
+                "for model compatibility and guidance. "
+                "Override via CHAT_CLAUDE_AGENT_THINKING_EFFORT."
+            ),
         )
     )
     claude_agent_max_transient_retries: int = Field(
