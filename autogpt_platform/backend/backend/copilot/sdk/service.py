@@ -4,6 +4,7 @@
 
 import asyncio
 import base64
+from copy import copy
 import json
 import logging
 import os
@@ -2909,46 +2910,46 @@ async def stream_chat_completion_sdk(
             cross_user_cache=_cross_user,
         )
 
-        sdk_options_kwargs: dict[str, Any] = {
-            "system_prompt": system_prompt_value,
-            "mcp_servers": {"copilot": mcp_server},
-            "allowed_tools": allowed,
-            "disallowed_tools": disallowed,
-            "hooks": security_hooks,
-            "cwd": sdk_cwd,
-            "max_buffer_size": config.claude_agent_max_buffer_size,
-            "stderr": _on_stderr,
+        sdk_options = ClaudeAgentOptions(
+            system_prompt=system_prompt_value,
+            mcp_servers={"copilot": mcp_server},
+            allowed_tools=allowed,
+            disallowed_tools=disallowed,
+            hooks=security_hooks,
+            cwd=sdk_cwd,
+            max_buffer_size=config.claude_agent_max_buffer_size,
+            stderr=_on_stderr,
             # --- P0 guardrails ---
             # fallback_model: SDK auto-retries with this cheaper model on
             # 529 (overloaded) errors, avoiding user-visible failures.
-            "fallback_model": _resolve_fallback_model(),
+            fallback_model=_resolve_fallback_model(),
             # max_turns: hard cap on agentic tool-use loops per query to
             # prevent runaway execution from burning budget.
-            "max_turns": config.claude_agent_max_turns,
+            max_turns=config.claude_agent_max_turns,
             # max_budget_usd: per-query spend ceiling enforced by the CLI.
-            "max_budget_usd": config.claude_agent_max_budget_usd,
+            max_budget_usd=config.claude_agent_max_budget_usd,
             # max_thinking_tokens: cap extended thinking output per LLM call.
             # Thinking tokens are billed at output rate ($75/M for Opus) and
             # account for ~54% of total cost.  8192 is the default.
             # Intentionally sent for all models including Sonnet — the CLI
             # silently ignores this field for non-Opus models (those without
             # native extended thinking), so it is safe to pass unconditionally.
-            "max_thinking_tokens": config.claude_agent_max_thinking_tokens,
-        }
+            max_thinking_tokens=config.claude_agent_max_thinking_tokens,
+        )
         # effort: only set for models with extended thinking (Opus).
         # Setting effort on Sonnet causes <internal_reasoning> tag leaks.
         if config.claude_agent_thinking_effort:
-            sdk_options_kwargs["effort"] = config.claude_agent_thinking_effort
+            sdk_options.effort = config.claude_agent_thinking_effort
         if sdk_model:
-            sdk_options_kwargs["model"] = sdk_model
+            sdk_options.model = sdk_model
 
         if sdk_env:
-            sdk_options_kwargs["env"] = sdk_env
+            sdk_options.env = sdk_env
         if use_resume and resume_file:
             # --resume {uuid} implies the session UUID — do NOT also pass
             # --session-id here.  CLI >=2.1.97 rejects the combination of
             # --session-id + --resume unless --fork-session is also given.
-            sdk_options_kwargs["resume"] = resume_file
+            sdk_options.resume = resume_file
         else:
             # Set session_id whenever NOT resuming so the CLI writes the
             # native session file to a predictable path for
@@ -2962,15 +2963,13 @@ async def stream_chat_completion_sdk(
             #     None), so no conflict with an existing file.
             # When --resume is active the session_id is already implied by
             # the resume file; passing it again would be rejected by the CLI.
-            sdk_options_kwargs["session_id"] = session_id
+            sdk_options.session_id = session_id
         # Optional explicit Claude Code CLI binary path (decouples the
         # bundled SDK version from the CLI version we run — needed because
         # the CLI bundled in 0.1.46+ is broken against OpenRouter).  Falls
         # back to the bundled binary when unset.
         if config.claude_agent_cli_path:
-            sdk_options_kwargs["cli_path"] = config.claude_agent_cli_path
-
-        options = ClaudeAgentOptions(**sdk_options_kwargs)  # type: ignore[arg-type]  # dynamic kwargs
+            sdk_options.cli_path = config.claude_agent_cli_path
 
         adapter = SDKResponseAdapter(message_id=message_id, session_id=session_id)
 
@@ -3116,7 +3115,7 @@ async def stream_chat_completion_sdk(
         fallback_notified_per_attempt = False
 
         state = _RetryState(
-            options=options,
+            options=sdk_options,
             query_message=query_message,
             was_compacted=was_compacted,
             use_resume=use_resume,
@@ -3175,25 +3174,25 @@ async def stream_chat_completion_sdk(
                     skip_transcript_upload = True
 
                 # Rebuild SDK options and query for the reduced context
-                sdk_options_kwargs_retry = dict(sdk_options_kwargs)
+                sdk_options_retry = copy(sdk_options)
                 if ctx.use_resume and ctx.resume_file:
-                    sdk_options_kwargs_retry["resume"] = ctx.resume_file
-                    sdk_options_kwargs_retry.pop("session_id", None)
-                elif "session_id" in sdk_options_kwargs:
+                    sdk_options_retry.resume = ctx.resume_file
+                    sdk_options_retry.session_id = None
+                elif sdk_options.session_id:
                     # Initial invocation used session_id (T1 or mode-switch
                     # T1): keep it so the CLI writes the session file to the
                     # predictable path for upload_transcript().  Storage is
                     # ephemeral per invocation, so no "Session ID already in
                     # use" conflict occurs — no prior file was restored.
-                    sdk_options_kwargs_retry.pop("resume", None)
-                    sdk_options_kwargs_retry["session_id"] = session_id
+                    sdk_options_retry.resume = None
+                    sdk_options_retry.session_id = session_id
                 else:
                     # T2+ retry without --resume: initial invocation used
                     # --resume, which restored the T1 session file to local
                     # storage.  Re-using session_id without --resume would
                     # fail with "Session ID already in use".
-                    sdk_options_kwargs_retry.pop("resume", None)
-                    sdk_options_kwargs_retry.pop("session_id", None)
+                    sdk_options_retry.resume = None
+                    sdk_options_retry.session_id = None
                 # Recompute system_prompt for retry — ctx.use_resume may have
                 # changed (context reduction enabled --resume).  CLI 2.1.97
                 # crashes when excludeDynamicSections=True is combined with
@@ -3201,10 +3200,10 @@ async def stream_chat_completion_sdk(
                 _cross_user_retry = (
                     config.claude_agent_cross_user_prompt_cache and not ctx.use_resume
                 )
-                sdk_options_kwargs_retry["system_prompt"] = _build_system_prompt_value(
+                sdk_options_retry.system_prompt = _build_system_prompt_value(
                     system_prompt, cross_user_cache=_cross_user_retry
                 )
-                state.options = ClaudeAgentOptions(**sdk_options_kwargs_retry)  # type: ignore[arg-type]  # dynamic kwargs
+                state.options = sdk_options_retry
                 # Retry intentionally omits prior_messages (transcript+gap context) and
                 # falls back to full session.messages[:-1] from DB — the authoritative
                 # source.  transcript+gap is an optimisation for the first attempt only;
