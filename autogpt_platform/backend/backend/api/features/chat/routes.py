@@ -891,8 +891,9 @@ async def stream_chat_post(
                     message_length=len(request.message),
                 )
             logger.info(f"[STREAM] Saving user message to session {session_id}")
-            saved = await append_and_save_message(session_id, message)
-            is_duplicate_message = saved is None
+            is_duplicate_message = (
+                await append_and_save_message(session_id, message)
+            ) is None
             logger.info(f"[STREAM] User message saved for session {session_id}")
 
         # Create a task in the stream registry for reconnection support
