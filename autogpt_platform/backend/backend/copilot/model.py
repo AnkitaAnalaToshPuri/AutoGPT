@@ -665,10 +665,20 @@ async def append_and_save_message(session_id: str, message: ChatMessage) -> Chat
         if session is None:
             raise ValueError(f"Session {session_id} not found")
 
-        # Idempotency: skip if last message is identical (infra/nginx retry).
-        # The cluster lock in the executor prevents duplicate execution;
-        # this prevents the duplicate DB write that would occur before
-        # the executor even picks up the task.
+        # Idempotency: skip if the trailing message already matches this one.
+        # This collapses infra/nginx retries that arrive before the executor
+        # picks up the turn (the executor's cluster lock handles duplicate
+        # *execution*; this handles duplicate *DB writes*).
+        #
+        # Legit same-text messages are distinguished by the assistant turn
+        # between them: if the user said "yes", got a response, and says "yes"
+        # again, session.messages[-1] is the assistant reply, so the role check
+        # fails and the second message goes through normally.
+        #
+        # Edge case: if a turn dies without writing any assistant message, the
+        # user's next send of the same text will be blocked here permanently.
+        # The fix for that is to ensure failed turns always write an error/
+        # timeout assistant message so the session always ends on an assistant.
         if (
             session.messages
             and session.messages[-1].role == message.role
