@@ -137,25 +137,27 @@ class TestLoadPriorTranscript:
         assert builder.entry_count == 4
 
     @pytest.mark.asyncio
-    async def test_missing_transcript_returns_false(self):
+    async def test_missing_transcript_allows_upload(self):
+        """Nothing in GCS → upload is safe; the turn writes the first snapshot."""
         builder = TranscriptBuilder()
         with patch(
             "backend.copilot.baseline.service.download_transcript",
             new=AsyncMock(return_value=None),
         ):
-            covers, dl = await _load_prior_transcript(
+            upload_safe, dl = await _load_prior_transcript(
                 user_id="user-1",
                 session_id="session-1",
                 session_messages=_make_session_messages("user", "assistant"),
                 transcript_builder=builder,
             )
 
-        assert covers is False
+        assert upload_safe is True
         assert dl is None
         assert builder.is_empty
 
     @pytest.mark.asyncio
-    async def test_invalid_transcript_returns_false(self):
+    async def test_invalid_transcript_allows_upload(self):
+        """Corrupt file in GCS → overwriting with a valid one is better."""
         builder = TranscriptBuilder()
         restore = TranscriptDownload(
             content=b'{"type":"progress","uuid":"a"}\n',
@@ -166,14 +168,14 @@ class TestLoadPriorTranscript:
             "backend.copilot.baseline.service.download_transcript",
             new=AsyncMock(return_value=restore),
         ):
-            covers, dl = await _load_prior_transcript(
+            upload_safe, dl = await _load_prior_transcript(
                 user_id="user-1",
                 session_id="session-1",
                 session_messages=_make_session_messages("user", "assistant"),
                 transcript_builder=builder,
             )
 
-        assert covers is False
+        assert upload_safe is True
         assert dl is None
         assert builder.is_empty
 
@@ -558,7 +560,7 @@ class TestTranscriptLifecycle:
             # --- 3. Gate + upload ---
             assert (
                 should_upload_transcript(
-                    user_id="user-1", transcript_covers_prefix=covers
+                    user_id="user-1", upload_safe=covers
                 )
                 is True
             )
@@ -625,14 +627,13 @@ class TestTranscriptLifecycle:
         )
 
         assert (
-            should_upload_transcript(user_id=None, transcript_covers_prefix=True)
+            should_upload_transcript(user_id=None, upload_safe=True)
             is False
         )
 
     @pytest.mark.asyncio
     async def test_lifecycle_missing_download_still_uploads_new_content(self):
-        """No prior session → covers defaults to True in the service,
-        new turn should upload cleanly."""
+        """No prior session → upload is safe; the turn writes the first snapshot."""
         builder = TranscriptBuilder()
         upload_mock = AsyncMock(return_value=None)
         with (
@@ -645,24 +646,22 @@ class TestTranscriptLifecycle:
                 new=upload_mock,
             ),
         ):
-            covers, dl = await _load_prior_transcript(
+            upload_safe, dl = await _load_prior_transcript(
                 user_id="user-1",
                 session_id="session-1",
                 session_messages=_make_session_messages("user"),
                 transcript_builder=builder,
             )
-            # No restore: covers is False, so the production path would
-            # skip upload. This protects against overwriting a future
-            # more-complete session with a single-turn snapshot.
-            assert covers is False
+            # Nothing in GCS → upload is safe so the first baseline turn
+            # can write the initial transcript snapshot.
+            assert upload_safe is True
             assert dl is None
             assert (
                 should_upload_transcript(
-                    user_id="user-1", transcript_covers_prefix=covers
+                    user_id="user-1", upload_safe=upload_safe
                 )
-                is False
+                is True
             )
-            upload_mock.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

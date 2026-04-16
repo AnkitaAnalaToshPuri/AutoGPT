@@ -704,16 +704,15 @@ async def _compress_session_messages(
 
 
 def should_upload_transcript(
-    user_id: str | None, transcript_covers_prefix: bool
+    user_id: str | None, upload_safe: bool
 ) -> bool:
     """Return ``True`` when the caller should upload the final transcript.
 
-    Uploads require a logged-in user (for the storage key) *and* a
-    transcript that covered the session prefix when loaded — otherwise
-    we'd be overwriting a more complete version in storage with a
-    partial one built from just the current turn.
+    Uploads require a logged-in user (for the storage key) *and* a safe
+    upload signal from ``_load_prior_transcript`` — i.e. GCS does not hold a
+    newer version that we'd be overwriting.
     """
-    return bool(user_id) and transcript_covers_prefix
+    return bool(user_id) and upload_safe
 
 
 def _append_gap_to_builder(
@@ -778,11 +777,11 @@ async def _load_prior_transcript(
 ) -> tuple[bool, "TranscriptDownload | None"]:
     """Download and load the prior CLI session into ``transcript_builder``.
 
-    Returns a tuple of (covers_prefix, transcript_download):
-    - ``covers_prefix`` is ``True`` when the loaded session fully covers the
-      session prefix; ``False`` otherwise (missing, invalid, or download error).
-      Callers should suppress uploads when this is ``False`` to avoid overwriting
-      a more complete version in storage.
+    Returns a tuple of (upload_safe, transcript_download):
+    - ``upload_safe`` is ``True`` when it is safe to upload at the end of this
+      turn.  Upload is suppressed only for **download errors** (unknown GCS
+      state) — missing and invalid files return ``True`` because there is
+      nothing in GCS worth protecting against overwriting.
     - ``transcript_download`` is a ``TranscriptDownload`` with str content
       (pre-decoded and stripped) when available, or ``None`` when no valid
       transcript could be loaded.  Callers pass this to
@@ -794,11 +793,14 @@ async def _load_prior_transcript(
         )
     except Exception as e:
         logger.warning("[Baseline] Session restore failed: %s", e)
+        # Unknown GCS state — be conservative, skip upload.
         return False, None
 
     if restore is None:
-        logger.debug("[Baseline] No CLI session available")
-        return False, None
+        logger.debug("[Baseline] No CLI session available — will upload fresh")
+        # Nothing in GCS to protect; allow upload so the first baseline turn
+        # writes the initial transcript snapshot.
+        return True, None
 
     content_bytes = restore.content
     try:
@@ -809,12 +811,14 @@ async def _load_prior_transcript(
         )
     except UnicodeDecodeError:
         logger.warning("[Baseline] CLI session content is not valid UTF-8")
-        return False, None
+        # Corrupt file in GCS; overwriting with a valid one is better.
+        return True, None
 
     stripped = strip_for_upload(raw_str)
     if not validate_transcript(stripped):
         logger.warning("[Baseline] CLI session content invalid after strip")
-        return False, None
+        # Corrupt file in GCS; overwriting with a valid one is better.
+        return True, None
 
     transcript_builder.load_previous(stripped, log_prefix="[Baseline]")
     logger.info(
@@ -965,7 +969,7 @@ async def stream_chat_completion_baseline(
 
     # --- Transcript support (feature parity with SDK path) ---
     transcript_builder = TranscriptBuilder()
-    transcript_covers_prefix = True
+    transcript_upload_safe = True
 
     # Build system prompt only on the first turn to avoid mid-conversation
     # changes from concurrent chats updating business understanding.
@@ -985,7 +989,7 @@ async def stream_chat_completion_baseline(
     transcript_download: TranscriptDownload | None = None
     if user_id and len(session.messages) > 1:
         (
-            (transcript_covers_prefix, transcript_download),
+            (transcript_upload_safe, transcript_download),
             (base_system_prompt, understanding),
         ) = await asyncio.gather(
             _load_prior_transcript(
@@ -1382,7 +1386,7 @@ async def stream_chat_completion_baseline(
                     stop_reason=STOP_REASON_END_TURN,
                 )
 
-        if user_id and should_upload_transcript(user_id, transcript_covers_prefix):
+        if user_id and should_upload_transcript(user_id, transcript_upload_safe):
             await _upload_final_transcript(
                 user_id=user_id,
                 session_id=session_id,
