@@ -33,6 +33,7 @@ from backend.data.user import (
 )
 from backend.notifications.email import EmailSender
 from backend.util.clients import get_database_manager_async_client
+from backend.util.feature_flag import Flag, is_feature_enabled
 from backend.util.logging import TruncatedLogger
 from backend.util.metrics import (
     AllQuietAlert,
@@ -468,7 +469,9 @@ class NotificationManager(AppService):
             discord_error = e
             logger.error(f"Failed to send Discord alert: {e}")
 
-        if correlation_id:
+        if correlation_id and await is_feature_enabled(
+            Flag.ALLQUIET_ALERTS, "system", default=True
+        ):
             title = _extract_clean_title(content)
             alert = AllQuietAlert(
                 severity=severity,

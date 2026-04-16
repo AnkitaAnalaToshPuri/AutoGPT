@@ -202,7 +202,11 @@ class TestNotificationErrorHandling:
         ) as mock_discord_send_alert, patch(
             "backend.notifications.notifications.send_allquiet_alert",
             new_callable=AsyncMock,
-        ) as mock_send_allquiet_alert:
+        ) as mock_send_allquiet_alert, patch(
+            "backend.notifications.notifications.is_feature_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             await notification_manager.system_alert(
                 content="🚨 **Alert Title**\nDetails here",
                 channel=DiscordChannel.PRODUCT,
@@ -234,7 +238,11 @@ class TestNotificationErrorHandling:
         ), patch(
             "backend.notifications.notifications.send_allquiet_alert",
             new_callable=AsyncMock,
-        ) as mock_send_allquiet_alert:
+        ) as mock_send_allquiet_alert, patch(
+            "backend.notifications.notifications.is_feature_enabled",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
             with pytest.raises(Exception, match="Discord down"):
                 await notification_manager.system_alert(
                     content="🚨 **Alert**\nDetails",
@@ -243,6 +251,29 @@ class TestNotificationErrorHandling:
                 )
 
         mock_send_allquiet_alert.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_system_alert_skips_allquiet_when_flag_disabled(
+        self, notification_manager
+    ):
+        with patch(
+            "backend.notifications.notifications.discord_send_alert",
+            new_callable=AsyncMock,
+        ), patch(
+            "backend.notifications.notifications.send_allquiet_alert",
+            new_callable=AsyncMock,
+        ) as mock_send_allquiet_alert, patch(
+            "backend.notifications.notifications.is_feature_enabled",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            await notification_manager.system_alert(
+                content="🚨 **Alert**\nDetails",
+                correlation_id="should-be-skipped",
+                severity="critical",
+            )
+
+        mock_send_allquiet_alert.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_system_alert_skips_allquiet_without_correlation_id(

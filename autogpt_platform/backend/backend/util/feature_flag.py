@@ -46,6 +46,7 @@ class Flag(str, Enum):
     STRIPE_PRICE_PRO = "stripe-price-id-pro"
     STRIPE_PRICE_BUSINESS = "stripe-price-id-business"
     GRAPHITI_MEMORY = "graphiti-memory"
+    ALLQUIET_ALERTS = "allquiet-alerts"
 
 
 def is_configured() -> bool:
