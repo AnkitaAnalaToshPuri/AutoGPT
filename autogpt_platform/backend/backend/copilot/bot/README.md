@@ -19,19 +19,18 @@ See `backend/.env.default` for the full list with documentation. Minimum setup:
 | Variable | Purpose |
 |----------|---------|
 | `AUTOPILOT_BOT_DISCORD_TOKEN` | Discord bot token — enables the Discord adapter |
-| `PLATFORM_BOT_API_KEY` | Shared auth key; must match the value the backend validates against |
-| `AUTOGPT_API_URL` | Backend base URL (default `http://localhost:8006`) |
 | `AUTOGPT_FRONTEND_URL` | Frontend base URL for link confirmation pages |
-| `REDIS_HOST` / `REDIS_PORT` | For session + thread subscription state (inherited from the shared backend config) |
+| `REDIS_HOST` / `REDIS_PORT` | Session + thread subscription state + copilot stream subscription (inherited from the shared backend config) |
+| `PLATFORMLINKINGMANAGER_HOST` | DNS name of the `PlatformLinkingManager` service pod (cluster-internal RPC) |
 
 ## Architecture
 
 ```
 bot/
-├── app.py              # Process entry, adapter factory
+├── app.py              # CoPilotChatBridge(AppService), adapter factory, outbound @expose RPC
 ├── config.py           # Shared (platform-agnostic) config
 ├── handler.py          # Core logic: routing, linking, batched streaming
-├── platform_api.py     # HTTP client for /api/platform-linking/* endpoints
+├── platform_api.py     # Thin facade over PlatformLinkingManagerClient + stream_registry
 ├── text.py             # Text splitting + batch formatting
 ├── threads.py          # Redis-backed thread subscription tracking
 └── adapters/

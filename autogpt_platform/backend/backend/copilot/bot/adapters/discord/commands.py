@@ -11,7 +11,8 @@ import discord
 from discord import app_commands
 
 from backend.copilot.bot.config import AUTOGPT_FRONTEND_URL
-from backend.copilot.bot.platform_api import PlatformAPI, PlatformAPIError
+from backend.copilot.bot.platform_api import PlatformAPI
+from backend.util.exceptions import LinkAlreadyExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,13 @@ async def _handle_setup(interaction: discord.Interaction, api: PlatformAPI) -> N
             server_name=interaction.guild.name,
             channel_id=str(interaction.channel_id or ""),
         )
-    except PlatformAPIError as e:
-        if e.status == 409:
-            await interaction.followup.send(
-                "This server is already linked — just mention me!",
-                ephemeral=True,
-            )
-            return
+    except LinkAlreadyExistsError:
+        await interaction.followup.send(
+            "This server is already linked — just mention me!",
+            ephemeral=True,
+        )
+        return
+    except Exception:
         logger.exception("Failed to create link token")
         await interaction.followup.send(
             "Something went wrong. Try again later.",

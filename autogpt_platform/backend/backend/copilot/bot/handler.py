@@ -11,10 +11,16 @@ from dataclasses import dataclass, field
 
 from backend.data.redis_client import get_redis_async
 
+from backend.util.exceptions import (
+    DuplicateChatMessageError,
+    LinkAlreadyExistsError,
+    NotFoundError,
+)
+
 from . import threads
 from .adapters.base import MessageContext, PlatformAdapter
 from .config import SESSION_TTL
-from .platform_api import PlatformAPI, PlatformAPIError
+from .platform_api import PlatformAPI
 from .text import format_batch, split_at_boundary
 
 logger = logging.getLogger(__name__)
@@ -141,17 +147,16 @@ class MessageHandler:
                     post, buffer = split_at_boundary(buffer, flush_at)
                     if post:
                         await adapter.send_message(target_id, post)
-        except PlatformAPIError:
-            logger.exception("Stream failed")
+        except DuplicateChatMessageError:
+            # Another in-flight turn is already processing this exact message —
+            # stay quiet so the user doesn't get a double response.
+            logger.info("Duplicate message dropped for target %s", target_id)
+            return
+        except NotFoundError:
+            logger.exception("Chat turn rejected")
             await adapter.send_message(
                 target_id, "AutoPilot ran into an error. Try again later."
             )
-            return
-        except asyncio.TimeoutError:
-            logger.warning("SSE stream timed out")
-            if buffer:
-                await adapter.send_message(target_id, buffer)
-            await adapter.send_message(target_id, "(Response timed out)")
             return
         except Exception:
             logger.warning("Backend unreachable during streaming")
@@ -198,7 +203,9 @@ class MessageHandler:
                         "Ask a server admin to run `/setup` first.",
                     )
                     return False
-        except PlatformAPIError:
+        except ValueError:
+            # ValueError-based domain exceptions (NotFoundError etc.) arrive
+            # over RPC with this base type.
             logger.exception("Failed to check link status")
             await adapter.send_message(
                 ctx.channel_id, "Something went wrong. Try again later."
@@ -231,11 +238,18 @@ class MessageHandler:
                 link_label="Link Account",
                 link_url=result.link_url,
             )
-        except PlatformAPIError as e:
-            if e.status == 409:
-                re_check = await self._api.resolve_user(ctx.platform, ctx.user_id)
-                if re_check.linked:
-                    return
+        except LinkAlreadyExistsError:
+            # Race: user got linked between resolve_user and create. Re-check
+            # — if still not linked, the backend returned a stale error and
+            # we shouldn't spam the user.
+            re_check = await self._api.resolve_user(ctx.platform, ctx.user_id)
+            if re_check.linked:
+                return
+            logger.exception(
+                "create_user_link_token raised 'already exists' "
+                "but user isn't actually linked"
+            )
+        except Exception:
             logger.exception("Failed to create user link token")
             await adapter.send_message(
                 ctx.channel_id,

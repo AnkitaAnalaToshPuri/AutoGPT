@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         RedisExecutionEventBus,
     )
     from backend.data.rabbitmq import AsyncRabbitMQ, SyncRabbitMQ
+    from backend.copilot.bot.app import CoPilotChatBridgeClient
     from backend.executor.scheduler import SchedulerClient
     from backend.integrations.credentials_store import IntegrationCredentialsStore
     from backend.notifications.notifications import NotificationManagerClient
@@ -75,6 +76,15 @@ def get_platform_linking_manager_client() -> "PlatformLinkingManagerClient":
     from backend.util.service import get_service_client
 
     return get_service_client(PlatformLinkingManagerClient)
+
+
+@thread_cached
+def get_copilot_chat_bridge_client() -> "CoPilotChatBridgeClient":
+    """Get a thread-cached CoPilotChatBridgeClient."""
+    from backend.copilot.bot.app import CoPilotChatBridgeClient
+    from backend.util.service import get_service_client
+
+    return get_service_client(CoPilotChatBridgeClient)
 
 
 # ============ Execution Event Bus Helpers ============ #

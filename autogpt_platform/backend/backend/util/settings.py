@@ -257,6 +257,12 @@ class Config(UpdateTrackingModel["Config"], BaseSettings):
         description="The port for the platform_linking manager daemon to run on",
     )
 
+    copilot_chat_bridge_port: int = Field(
+        default=8010,
+        description="The port for the CoPilot chat bridge (multi-platform bot) "
+        "service daemon to run on",
+    )
+
     otto_api_url: str = Field(
         default="",
         description="The URL for the Otto API service",
