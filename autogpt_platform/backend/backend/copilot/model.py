@@ -757,6 +757,9 @@ async def append_message_if(
             await cache_chat_session(session)
         except Exception as e:
             logger.warning(f"Cache write failed for session {session_id}: {e}")
+            # Invalidate the stale entry so future reads fall back to DB,
+            # preventing a predicate check from acting on stale state.
+            await invalidate_session_cache(session_id)
 
         return session
 
