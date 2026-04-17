@@ -35,9 +35,11 @@ export const NodeHeader = ({ data, nodeId }: Props) => {
   }, [title, isEditingTitle]);
 
   const handleTitleEdit = () => {
-    updateNodeData(nodeId, {
-      metadata: { ...data.metadata, customized_name: editedTitle },
-    });
+    if (editedTitle !== title) {
+      updateNodeData(nodeId, {
+        metadata: { ...data.metadata, customized_name: editedTitle },
+      });
+    }
     setIsEditingTitle(false);
   };
 
