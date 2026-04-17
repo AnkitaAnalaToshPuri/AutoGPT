@@ -109,6 +109,31 @@ export function useLoadMoreMessages({
     }
   }, [sessionId, initialOldestSequence, initialNewestSequence, initialHasMore]);
 
+  // When a session transitions from active (forwardPaginated=false) to
+  // complete (forwardPaginated=true), any backward-paged older messages
+  // would be appended AFTER the current page instead of before, causing
+  // chronological disorder. Reset so the completed session renders cleanly.
+  const prevForwardPaginatedRef = useRef(forwardPaginated);
+  useEffect(() => {
+    const wasBackward = !prevForwardPaginatedRef.current;
+    prevForwardPaginatedRef.current = forwardPaginated;
+    if (wasBackward && forwardPaginated && pagedRawMessages.length > 0) {
+      setPagedRawMessages([]);
+      setOldestSequence(initialOldestSequence);
+      setNewestSequence(initialNewestSequence);
+      setHasMore(false);
+      setIsLoadingMore(false);
+      isLoadingMoreRef.current = false;
+      consecutiveErrorsRef.current = 0;
+      epochRef.current += 1;
+    }
+  }, [
+    forwardPaginated,
+    pagedRawMessages.length,
+    initialOldestSequence,
+    initialNewestSequence,
+  ]);
+
   // Convert all accumulated raw messages in one pass so tool outputs
   // are matched across inter-page boundaries.
   // For backward pagination only: include initial page tool outputs so older

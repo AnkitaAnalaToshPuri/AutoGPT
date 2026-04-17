@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useCopilotPage } from "../useCopilotPage";
 
@@ -21,12 +21,18 @@ vi.mock("../useCopilotNotifications", () => ({
 vi.mock("../useWorkflowImportAutoSubmit", () => ({
   useWorkflowImportAutoSubmit: () => undefined,
 }));
+vi.mock("../useSendMessage", () => ({
+  useSendMessage: () => ({
+    onSend: vi.fn(),
+    isUploadingFiles: false,
+    pendingFilePartsRef: { current: [] },
+  }),
+}));
+vi.mock("../useSessionTitlePoll", () => ({
+  useSessionTitlePoll: () => undefined,
+}));
 vi.mock("../store", () => ({
   useCopilotUIStore: () => ({
-    sessionToDelete: null,
-    setSessionToDelete: vi.fn(),
-    isDrawerOpen: false,
-    setDrawerOpen: vi.fn(),
     copilotChatMode: "chat",
     copilotLlmModel: null,
     isDryRun: false,
@@ -35,25 +41,8 @@ vi.mock("../store", () => ({
 vi.mock("../helpers/convertChatSessionToUiMessages", () => ({
   concatWithAssistantMerge: (a: unknown[], b: unknown[]) => [...a, ...b],
 }));
-vi.mock("@/app/api/__generated__/endpoints/chat/chat", () => ({
-  useDeleteV2DeleteSession: () => ({ mutate: vi.fn(), isPending: false }),
-  useGetV2ListSessions: () => ({ data: undefined, isLoading: false }),
-  getGetV2ListSessionsQueryKey: () => ["sessions"],
-}));
-vi.mock("@/components/molecules/Toast/use-toast", () => ({
-  toast: vi.fn(),
-}));
-vi.mock("@/lib/direct-upload", () => ({
-  uploadFileDirect: vi.fn(),
-}));
-vi.mock("@/lib/hooks/useBreakpoint", () => ({
-  useBreakpoint: () => "lg",
-}));
 vi.mock("@/lib/supabase/hooks/useSupabase", () => ({
   useSupabase: () => ({ isUserLoading: false, isLoggedIn: true }),
-}));
-vi.mock("@tanstack/react-query", () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 vi.mock("@/services/feature-flags/use-get-flag", () => ({
   Flag: { CHAT_MODE_OPTION: "CHAT_MODE_OPTION" },
@@ -152,51 +141,5 @@ describe("useCopilotPage — forwardPaginated message ordering", () => {
     // Forward: currentMessages (beginning of session) come first
     expect(result.current.messages[0]).toEqual(currentMsg);
     expect(result.current.messages[1]).toEqual(pagedMsg);
-  });
-
-  it("calls resetPaged when forwardPaginated transitions false→true with paged messages", async () => {
-    const mockResetPaged = vi.fn();
-    const pagedMsg = { id: "paged", role: "user" };
-
-    mockUseChatSession.mockReturnValue(
-      makeBaseChatSession({ forwardPaginated: false }),
-    );
-    mockUseCopilotStream.mockReturnValue(makeBaseCopilotStream());
-    mockUseLoadMoreMessages.mockReturnValue(
-      makeBaseLoadMore({
-        pagedMessages: [pagedMsg],
-        resetPaged: mockResetPaged,
-      }),
-    );
-
-    const { rerender } = renderHook(() => useCopilotPage());
-
-    // Simulate session completing — forwardPaginated flips to true
-    mockUseChatSession.mockReturnValue(
-      makeBaseChatSession({ forwardPaginated: true }),
-    );
-
-    act(() => {
-      rerender();
-    });
-
-    await waitFor(() => {
-      expect(mockResetPaged).toHaveBeenCalled();
-    });
-  });
-
-  it("does not call resetPaged when forwardPaginated is already true on mount", () => {
-    const mockResetPaged = vi.fn();
-    mockUseChatSession.mockReturnValue(
-      makeBaseChatSession({ forwardPaginated: true }),
-    );
-    mockUseCopilotStream.mockReturnValue(makeBaseCopilotStream());
-    mockUseLoadMoreMessages.mockReturnValue(
-      makeBaseLoadMore({ pagedMessages: [], resetPaged: mockResetPaged }),
-    );
-
-    renderHook(() => useCopilotPage());
-
-    expect(mockResetPaged).not.toHaveBeenCalled();
   });
 });

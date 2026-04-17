@@ -75,6 +75,42 @@ describe("useLoadMoreMessages", () => {
     }).not.toThrow();
   });
 
+  it("auto-resets paged state when forwardPaginated transitions false→true with paged messages", async () => {
+    const rawMsg = { role: "user", content: "old", sequence: -1 };
+    mockGetV2GetSession.mockResolvedValueOnce(
+      makeSuccessResponse({
+        messages: [rawMsg],
+        has_more_messages: true,
+        oldest_sequence: -2,
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      (props) => useLoadMoreMessages(props),
+      { initialProps: { ...BASE_ARGS, forwardPaginated: false } },
+    );
+
+    // Load an older page so pagedRawMessages has content
+    await act(async () => {
+      await result.current.loadMore();
+    });
+
+    // Simulate session completing — forwardPaginated flips to true
+    rerender({ ...BASE_ARGS, forwardPaginated: true });
+
+    expect(result.current.pagedMessages).toHaveLength(0);
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it("does not auto-reset when forwardPaginated is already true on mount", () => {
+    const { result } = renderHook(() =>
+      useLoadMoreMessages({ ...BASE_ARGS, forwardPaginated: true }),
+    );
+
+    expect(result.current.pagedMessages).toHaveLength(0);
+    expect(result.current.hasMore).toBe(true);
+  });
+
   it("resets all state on sessionId change", () => {
     const { result, rerender } = renderHook(
       (props) => useLoadMoreMessages(props),

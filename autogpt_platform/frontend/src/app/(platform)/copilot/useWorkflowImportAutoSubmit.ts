@@ -87,12 +87,10 @@ function extractPromptFromUrl(): {
  * Extracted from useCopilotPage to keep that hook focused on page-level concerns.
  */
 export function useWorkflowImportAutoSubmit({
-  createSession,
-  setPendingMessage,
+  onSend,
   pendingFilePartsRef,
 }: {
-  createSession: () => Promise<string | undefined>;
-  setPendingMessage: (msg: string | null) => void;
+  onSend: (message: string) => Promise<void>;
   pendingFilePartsRef: React.MutableRefObject<FileUIPart[]>;
 }) {
   const { setInitialPrompt } = useCopilotUIStore();
@@ -110,13 +108,11 @@ export function useWorkflowImportAutoSubmit({
       if (urlPrompt.filePart) {
         pendingFilePartsRef.current = [urlPrompt.filePart];
       }
-      setPendingMessage(urlPrompt.prompt);
-      void createSession().catch(() => {
-        setPendingMessage(null);
+      void onSend(urlPrompt.prompt).catch(() => {
         setInitialPrompt(urlPrompt.prompt);
       });
     } else {
       setInitialPrompt(urlPrompt.prompt);
     }
-  }, [createSession, setInitialPrompt, setPendingMessage, pendingFilePartsRef]);
+  }, [onSend, setInitialPrompt, pendingFilePartsRef]);
 }

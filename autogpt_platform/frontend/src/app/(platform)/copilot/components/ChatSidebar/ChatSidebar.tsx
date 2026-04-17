@@ -1,7 +1,6 @@
 "use client";
 import {
   getGetV2ListSessionsQueryKey,
-  useDeleteV2DeleteSession,
   useGetV2ListSessions,
   usePatchV2UpdateSessionTitle,
 } from "@/app/api/__generated__/endpoints/chat/chat";
@@ -36,6 +35,7 @@ import { parseAsString, useQueryState } from "nuqs";
 import { useEffect, useRef, useState } from "react";
 import { formatNotificationTitle } from "../../helpers";
 import { useCopilotUIStore } from "../../store";
+import { useSessionDeletion } from "../../useSessionDeletion";
 import { NotificationToggle } from "./components/NotificationToggle/NotificationToggle";
 import { DeleteChatDialog } from "../DeleteChatDialog/DeleteChatDialog";
 import { UsageLimits } from "../UsageLimits/UsageLimits";
@@ -44,41 +44,20 @@ export function ChatSidebar() {
   const { state } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [sessionId, setSessionId] = useQueryState("sessionId", parseAsString);
-  const {
-    sessionToDelete,
-    setSessionToDelete,
-    completedSessionIDs,
-    clearCompletedSession,
-  } = useCopilotUIStore();
+  const { completedSessionIDs, clearCompletedSession } = useCopilotUIStore();
 
   const queryClient = useQueryClient();
 
   const { data: sessionsResponse, isLoading: isLoadingSessions } =
     useGetV2ListSessions({ limit: 50 }, { query: { refetchInterval: 10_000 } });
 
-  const { mutate: deleteSession, isPending: isDeleting } =
-    useDeleteV2DeleteSession({
-      mutation: {
-        onSuccess: () => {
-          queryClient.invalidateQueries({
-            queryKey: getGetV2ListSessionsQueryKey(),
-          });
-          if (sessionToDelete?.id === sessionId) {
-            setSessionId(null);
-          }
-          setSessionToDelete(null);
-        },
-        onError: (error) => {
-          toast({
-            title: "Failed to delete chat",
-            description:
-              error instanceof Error ? error.message : "An error occurred",
-            variant: "destructive",
-          });
-          setSessionToDelete(null);
-        },
-      },
-    });
+  const {
+    sessionToDelete,
+    isDeleting,
+    requestDelete,
+    confirmDelete,
+    cancelDelete,
+  } = useSessionDeletion();
 
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -165,20 +144,7 @@ export function ChatSidebar() {
     title: string | null | undefined,
   ) {
     e.stopPropagation();
-    if (isDeleting) return;
-    setSessionToDelete({ id, title });
-  }
-
-  function handleConfirmDelete() {
-    if (sessionToDelete) {
-      deleteSession({ sessionId: sessionToDelete.id });
-    }
-  }
-
-  function handleCancelDelete() {
-    if (!isDeleting) {
-      setSessionToDelete(null);
-    }
+    requestDelete(id, title);
   }
 
   function formatDate(dateString: string) {
@@ -424,8 +390,8 @@ export function ChatSidebar() {
       <DeleteChatDialog
         session={sessionToDelete}
         isDeleting={isDeleting}
-        onConfirm={handleConfirmDelete}
-        onCancel={handleCancelDelete}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
       />
     </>
   );

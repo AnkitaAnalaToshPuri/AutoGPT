@@ -27,6 +27,17 @@ vi.mock("../components/NotificationDialog/NotificationDialog", () => ({
 vi.mock("../components/RateLimitResetDialog/RateLimitResetDialog", () => ({
   RateLimitResetDialog: () => null,
 }));
+vi.mock("../components/RateLimitResetDialog/RateLimitGate", () => ({
+  RateLimitGate: () => null,
+}));
+vi.mock("../components/FileDropZone/FileDropZone", () => ({
+  FileDropZone: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+}));
+vi.mock("../useIsMobile", () => ({
+  useIsMobile: () => false,
+}));
 vi.mock("../components/ScaleLoader/ScaleLoader", () => ({
   ScaleLoader: () => <div data-testid="scale-loader" />,
 }));
@@ -79,23 +90,10 @@ const basePageState = {
   hasMoreMessages: false,
   isLoadingMore: false,
   loadMore: vi.fn(),
-  isMobile: false,
-  isDrawerOpen: false,
-  sessions: [],
-  isLoadingSessions: false,
-  handleOpenDrawer: vi.fn(),
-  handleCloseDrawer: vi.fn(),
-  handleDrawerOpenChange: vi.fn(),
-  handleSelectSession: vi.fn(),
-  handleNewChat: vi.fn(),
-  sessionToDelete: null,
-  isDeleting: false,
-  handleConfirmDelete: vi.fn(),
-  handleCancelDelete: vi.fn(),
+  forwardPaginated: false,
   historicalDurations: {},
   rateLimitMessage: null,
   dismissRateLimit: vi.fn(),
-  isDryRun: false,
   sessionDryRun: false,
 };
 
