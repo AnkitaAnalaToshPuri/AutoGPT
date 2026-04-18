@@ -71,6 +71,7 @@ ToolName = Literal[
     "browser_act",
     "browser_navigate",
     "browser_screenshot",
+    "check_background_tool",
     "connect_integration",
     "continue_run_block",
     "create_agent",
