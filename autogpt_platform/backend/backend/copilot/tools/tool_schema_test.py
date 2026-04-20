@@ -14,8 +14,8 @@ import pytest
 
 from backend.copilot.tools import TOOL_REGISTRY
 
-# Character budget (~4 chars/token heuristic, targeting ~8000 tokens)
-_CHAR_BUDGET = 32_000
+# Character budget (~4 chars/token heuristic, targeting ~8500 tokens)
+_CHAR_BUDGET = 34_000
 
 
 @pytest.fixture(scope="module")

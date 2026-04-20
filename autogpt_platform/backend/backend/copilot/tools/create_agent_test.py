@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from backend.copilot.model import ChatMessage
 from backend.copilot.tools.create_agent import CreateAgentTool
 from backend.copilot.tools.models import AgentPreviewResponse, ErrorResponse
 
@@ -13,6 +14,28 @@ _TEST_USER_ID = "test-user-create-agent"
 _PIPELINE = "backend.copilot.tools.agent_generator.pipeline"
 
 
+def _add_approval_history(session):
+    """Add decompose_goal + user approval to the session so the
+    needs_build_plan_approval gate passes."""
+    session.messages.append(
+        ChatMessage(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "call_decompose",
+                    "type": "function",
+                    "function": {"name": "decompose_goal", "arguments": "{}"},
+                }
+            ],
+        )
+    )
+    session.messages.append(ChatMessage(role="tool", content="{plan}"))
+    session.messages.append(
+        ChatMessage(role="user", content="Approved. Please build the agent.")
+    )
+
+
 @pytest.fixture
 def tool():
     return CreateAgentTool()
@@ -20,7 +43,9 @@ def tool():
 
 @pytest.fixture
 def session():
-    return make_session(_TEST_USER_ID)
+    s = make_session(_TEST_USER_ID)
+    _add_approval_history(s)
+    return s
 
 
 # ── Input validation tests ──────────────────────────────────────────────
