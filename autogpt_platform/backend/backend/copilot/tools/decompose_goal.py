@@ -111,6 +111,18 @@ async def _run_auto_approve(session_id: str, user_id: str | None) -> None:
             )
             return
 
+        # Skip if a turn is already in flight — the client already sent
+        # "Approved" and started the build. Only fire when the session is
+        # idle (client closed the tab).
+        from backend.copilot.pending_message_helpers import is_turn_in_flight
+
+        if await is_turn_in_flight(session_id):
+            logger.info(
+                "decompose_goal auto-approve skipped (turn in flight) for session %s",
+                session_id,
+            )
+            return
+
         from backend.copilot.sdk.session_waiter import run_copilot_turn_via_queue
 
         outcome, result = await run_copilot_turn_via_queue(
@@ -122,10 +134,9 @@ async def _run_auto_approve(session_id: str, user_id: str | None) -> None:
             tool_name="decompose_goal_auto_approve",
         )
         logger.info(
-            "decompose_goal auto-approve fired for session %s (outcome=%s, queued=%s)",
+            "decompose_goal auto-approve fired for session %s (outcome=%s)",
             session_id,
             outcome,
-            result.queued,
         )
     except asyncio.CancelledError:
         raise
