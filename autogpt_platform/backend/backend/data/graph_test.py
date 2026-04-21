@@ -1877,9 +1877,7 @@ def test_auto_credentials_partial_object_missing_cred_id_rejected():
     `_acquire_auto_credentials` in the executor would raise
     "Authentication missing" at run time. Validator must catch this
     before save and tell the author to use the input block."""
-    graph = _sheets_graph(
-        {"id": "1KAv8hhChef7a5ycn6Al1M4DdkiG_PVcKQ_tYkRpGA-I"}
-    )
+    graph = _sheets_graph({"id": "1KAv8hhChef7a5ycn6Al1M4DdkiG_PVcKQ_tYkRpGA-I"})
 
     errors = GraphModel._validate_graph_get_errors(graph)
 
@@ -1970,8 +1968,7 @@ def test_auto_credentials_with_upstream_link_accepted():
     errors = GraphModel._validate_graph_get_errors(graph)
 
     assert (
-        sheets_node.id not in errors
-        or "spreadsheet" not in errors[sheets_node.id]
+        sheets_node.id not in errors or "spreadsheet" not in errors[sheets_node.id]
     ), errors
 
 
@@ -1997,9 +1994,7 @@ def test_auto_credentials_unset_does_not_emit_double_error():
 
     errors = GraphModel._validate_graph_get_errors(graph)
 
-    assert (
-        node.id not in errors or "spreadsheet" not in errors[node.id]
-    ), errors
+    assert node.id not in errors or "spreadsheet" not in errors[node.id], errors
 
 
 def test_auto_credentials_bare_string_does_not_over_match_non_auto_fields():
