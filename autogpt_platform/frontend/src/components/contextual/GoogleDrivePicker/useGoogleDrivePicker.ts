@@ -1,6 +1,6 @@
 import {
   getGetV1GetSpecificCredentialByIdQueryOptions,
-  getV1GetPickerToken,
+  postV1GetPickerToken,
 } from "@/app/api/__generated__/endpoints/integrations/integrations";
 import { useToast } from "@/components/molecules/Toast/use-toast";
 import useCredentials from "@/hooks/useCredentials";
@@ -20,7 +20,7 @@ import {
 import { okData } from "@/app/api/helpers";
 
 async function fetchPickerAccessToken(credentialId: string): Promise<string> {
-  const response = await getV1GetPickerToken("google", credentialId);
+  const response = await postV1GetPickerToken("google", credentialId);
   const token = okData(response)?.access_token;
   if (!token) {
     throw new Error(

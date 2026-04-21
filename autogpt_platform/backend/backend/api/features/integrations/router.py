@@ -311,6 +311,7 @@ class PickerTokenResponse(BaseModel):
 @router.post(
     "/{provider}/credentials/{cred_id}/picker-token",
     summary="Issue a short-lived access token for a provider-hosted picker",
+    operation_id="postV1GetPickerToken",
 )
 async def get_picker_token(
     provider: Annotated[
