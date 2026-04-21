@@ -3,9 +3,8 @@
 import asyncio
 import logging
 from typing import Any
-from uuid import uuid4
 
-from backend.copilot.model import ChatMessage, ChatSession, append_message_if
+from backend.copilot.model import ChatSession
 from backend.data.redis_client import get_redis_async
 
 from .base import BaseTool
@@ -93,44 +92,12 @@ def needs_build_plan_approval(session: ChatSession) -> bool:
     return True
 
 
-def _no_user_action_since(baseline_index: int):
-    """Predicate: returns True iff no ``role == "user"`` message exists at
-    or after ``baseline_index`` in the session message list.
-
-    Why an index instead of ``ChatMessage.sequence``: ``_save_session_to_db``
-    persists messages with auto-assigned sequences in the DB but does NOT
-    write those sequences back onto the in-memory ``ChatMessage`` objects,
-    and ``cache_chat_session`` writes the in-memory copy to Redis. So when
-    this predicate later loads the session from cache, freshly-appended
-    messages have ``sequence=None``, which would falsely register as 0 and
-    miss them entirely — the predicate would treat the user's manual
-    "Approved" as if it never happened, and the auto-approve would fire a
-    duplicate after the agent build had already completed. Indices are
-    monotonic and require no DB-side bookkeeping.
-    """
-
-    def _check(session: ChatSession) -> bool:
-        for m in session.messages[baseline_index:]:
-            if m.role == "user":
-                return False
-        return True
-
-    return _check
-
-
-async def _run_auto_approve(
-    session_id: str,
-    user_id: str | None,
-    baseline_index: int,
-) -> None:
-    """Wait the server-side timeout and inject a synthetic approval if the
-    user has not acted in the meantime.
+async def _run_auto_approve(session_id: str, user_id: str | None) -> None:
+    """Wait the server-side timeout and dispatch the approval via
+    ``run_copilot_turn_via_queue`` — the canonical helper that queues the
+    message if a turn is already in flight, or starts a new turn if idle.
 
     Cancelled when the user clicks "Modify" (via ``cancel_auto_approve``).
-
-    Limitation: this lives in the executor process; if the worker restarts
-    during the wait, the pending approval is lost (the user falls back to
-    manual approve). Restart-resilience would need a Redis-backed scheduler.
     """
     try:
         await asyncio.sleep(AUTO_APPROVE_SERVER_SECONDS)
@@ -144,45 +111,22 @@ async def _run_auto_approve(
             )
             return
 
-        approval = ChatMessage(role="user", content=AUTO_APPROVE_MESSAGE)
-        result = await append_message_if(
-            session_id=session_id,
-            message=approval,
-            predicate=_no_user_action_since(baseline_index),
-        )
-        if result is None:
-            # User already acted (or the session is gone) — nothing to do.
-            return
+        from backend.copilot.sdk.session_waiter import run_copilot_turn_via_queue
 
-        # Local imports avoid a circular dependency between this module and
-        # the executor / API stream registry packages.
-        from backend.copilot import stream_registry
-        from backend.copilot.executor.utils import enqueue_copilot_turn
-
-        turn_id = str(uuid4())
-        await stream_registry.create_session(
+        outcome, result = await run_copilot_turn_via_queue(
             session_id=session_id,
             user_id=user_id or "",
-            tool_call_id="chat_stream",
-            tool_name="chat",
-            turn_id=turn_id,
+            message=AUTO_APPROVE_MESSAGE,
+            timeout=0,
+            tool_call_id="auto_approve",
+            tool_name="decompose_goal_auto_approve",
         )
-        try:
-            await enqueue_copilot_turn(
-                session_id=session_id,
-                user_id=user_id,
-                message=AUTO_APPROVE_MESSAGE,
-                turn_id=turn_id,
-                is_user_message=True,
-            )
-        except Exception:
-            # If enqueueing fails, mark the session completed so it doesn't
-            # stay stuck in "running" state in the stream registry forever.
-            await stream_registry.mark_session_completed(
-                session_id, error_message="Auto-approve enqueue failed"
-            )
-            raise
-        logger.info("decompose_goal auto-approve fired for session %s", session_id)
+        logger.info(
+            "decompose_goal auto-approve fired for session %s (outcome=%s, queued=%s)",
+            session_id,
+            outcome,
+            result.queued,
+        )
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -226,13 +170,7 @@ async def cancel_auto_approve(session_id: str) -> bool:
 async def _schedule_auto_approve(
     session_id: str | None, user_id: str | None, session: ChatSession
 ) -> None:
-    """Schedule the fire-and-forget auto-approve task for this session.
-
-    The baseline is the current message-list length: any message that
-    arrives at or after this index is "after the decomposition", so a
-    user message there means the user (or a follow-up turn) has acted
-    and the auto-approve should be skipped.
-    """
+    """Schedule the fire-and-forget auto-approve task for this session."""
     if not session_id:
         return
     # Cancel any existing pending approval for this session (e.g. if the
@@ -244,8 +182,7 @@ async def _schedule_auto_approve(
     # the new auto-approve task isn't incorrectly suppressed.
     redis = await get_redis_async()
     await redis.delete(f"{_CANCEL_KEY_PREFIX}{session_id}")
-    baseline_index = len(session.messages)
-    task = asyncio.create_task(_run_auto_approve(session_id, user_id, baseline_index))
+    task = asyncio.create_task(_run_auto_approve(session_id, user_id))
     _pending_auto_approvals[session_id] = task
     # Only remove from dict if this task is still the current one — a
     # cancelled old task's callback must not clobber a newly-scheduled one.
