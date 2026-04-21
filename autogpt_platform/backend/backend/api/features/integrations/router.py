@@ -292,6 +292,78 @@ async def get_credential(
     return to_meta_response(credential)
 
 
+class PickerTokenResponse(BaseModel):
+    """Short-lived OAuth access token shipped to the browser for rendering a
+    provider-hosted picker UI (e.g. Google Drive Picker). Deliberately narrow:
+    only the fields the client needs to initialize the picker widget. Issued
+    from the user's own stored credential so ownership and scope gating are
+    enforced by the credential lookup."""
+
+    access_token: str = Field(
+        description="OAuth access token suitable for the picker SDK call."
+    )
+    access_token_expires_at: int | None = Field(
+        default=None,
+        description="Unix timestamp at which the access token expires, if known.",
+    )
+
+
+@router.post(
+    "/{provider}/credentials/{cred_id}/picker-token",
+    summary="Issue a short-lived access token for a provider-hosted picker",
+)
+async def get_picker_token(
+    provider: Annotated[
+        ProviderName, Path(title="The provider that owns the credentials")
+    ],
+    cred_id: Annotated[
+        str, Path(title="The ID of the OAuth2 credentials to mint a token from")
+    ],
+    user_id: Annotated[str, Security(get_user_id)],
+) -> PickerTokenResponse:
+    """Return the raw access token for an OAuth2 credential so the frontend
+    can initialize a provider-hosted picker (e.g. Google Drive Picker).
+
+    `GET /{provider}/credentials/{cred_id}` deliberately strips secrets (see
+    `CredentialsMetaResponse` + `TestGetCredentialReturnsMetaOnly` in
+    `router_test.py`). That hardening broke the Drive picker, which needs the
+    raw access token to call `google.picker.Builder.setOAuthToken(...)`. This
+    endpoint carves a narrow, explicit hole: the caller must own the
+    credential, it must be OAuth2, and the endpoint returns only the access
+    token + its expiry — nothing else about the credential. SDK-default
+    credentials are excluded for the same reason as `get_credential`.
+    """
+    if is_sdk_default(cred_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Credentials not found"
+        )
+
+    credential = await creds_manager.get(user_id, cred_id)
+    if not credential:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Credentials not found"
+        )
+    if not provider_matches(credential.provider, provider):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Credentials not found"
+        )
+    if not isinstance(credential, OAuth2Credentials):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Picker tokens are only available for OAuth2 credentials",
+        )
+    if not credential.access_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential has no access token; reconnect the account",
+        )
+
+    return PickerTokenResponse(
+        access_token=credential.access_token.get_secret_value(),
+        access_token_expires_at=credential.access_token_expires_at,
+    )
+
+
 @router.post("/{provider}/credentials", status_code=201, summary="Create Credentials")
 async def create_credentials(
     user_id: Annotated[str, Security(get_user_id)],

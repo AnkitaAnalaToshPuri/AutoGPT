@@ -4980,6 +4980,56 @@
         }
       }
     },
+    "/api/integrations/{provider}/credentials/{cred_id}/picker-token": {
+      "post": {
+        "tags": ["v1", "integrations"],
+        "summary": "Issue a short-lived access token for a provider-hosted picker",
+        "operationId": "getV1GetPickerToken",
+        "security": [{ "HTTPBearerJWT": [] }],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "The provider that owns the credentials",
+              "description": "Provider name for integrations. Can be any string value, including custom provider names."
+            }
+          },
+          {
+            "name": "cred_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "The ID of the OAuth2 credentials to mint a token from"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PickerTokenResponse" }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/HTTP401NotAuthenticatedError"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/integrations/{provider}/login": {
       "get": {
         "tags": ["v1", "integrations"],
@@ -10655,6 +10705,23 @@
         "type": "object",
         "required": ["revoked"],
         "title": "CredentialsDeletionResponse"
+      },
+      "PickerTokenResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "OAuth access token suitable for the picker SDK call."
+          },
+          "access_token_expires_at": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Access Token Expires At",
+            "description": "Unix timestamp at which the access token expires, if known."
+          }
+        },
+        "type": "object",
+        "required": ["access_token"],
+        "title": "PickerTokenResponse"
       },
       "CredentialsMetaInput": {
         "properties": {
