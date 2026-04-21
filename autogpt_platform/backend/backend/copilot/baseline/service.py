@@ -1384,11 +1384,18 @@ async def stream_chat_completion_baseline(
 
     message_id = str(uuid.uuid4())
 
-    # Append tool documentation, technical notes, and Graphiti memory instructions
+    # The system prompt MUST be identical across users — the cacheable prefix
+    # ends at the ``cache_control`` breakpoint on this block, so any per-user
+    # content here forks the cache by user cohort and each cohort pays for
+    # its own write.  The Graphiti memory instructions are therefore always
+    # appended: memory tools are in the registry for every user and gate
+    # themselves at handler level (``is_enabled_for_user`` in each
+    # graphiti_* tool), so flag-off users get a "memory disabled" response
+    # from the handler instead of a divergent system prompt.  Warm context
+    # and ingest still honor the flag below — those are per-user data, not
+    # per-user instructions.
     graphiti_enabled = await is_enabled_for_user(user_id)
-
-    graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
-    system_prompt = base_system_prompt + SHARED_TOOL_NOTES + graphiti_supplement
+    system_prompt = base_system_prompt + SHARED_TOOL_NOTES + get_graphiti_supplement()
 
     # Warm context: pre-load relevant facts from Graphiti on first turn.
     # Use the pre-drain count so pending messages drained at turn start

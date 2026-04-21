@@ -2953,13 +2953,19 @@ async def stream_chat_completion_sdk(
         use_e2b = e2b_sandbox is not None
         # Append appropriate supplement (Claude gets tool schemas automatically)
 
+        # Always append the Graphiti memory instructions so the system prompt
+        # — the cacheable prefix on the SDK path — stays identical across
+        # users regardless of the ``GRAPHITI_MEMORY`` flag.  Memory tools
+        # self-gate at handler level (``is_enabled_for_user`` in each
+        # graphiti_* tool), so flag-off users never see memory side effects.
+        # Warm context + ingest still honor the flag below — those operate
+        # on per-user data, not on the static instructions.
         graphiti_enabled = await is_enabled_for_user(user_id)
 
-        graphiti_supplement = get_graphiti_supplement() if graphiti_enabled else ""
         system_prompt = (
             base_system_prompt
             + get_sdk_supplement(use_e2b=use_e2b)
-            + graphiti_supplement
+            + get_graphiti_supplement()
         )
 
         # Warm context: pre-load relevant facts from Graphiti on first turn.
