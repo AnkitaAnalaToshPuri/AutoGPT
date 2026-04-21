@@ -530,7 +530,7 @@ def _extract_reasoning_delta(delta: Any) -> str:
     return "".join(parts)
 
 
-def _close_reasoning_block_if_open(state: "_BaselineStreamState") -> None:
+def _close_reasoning_block_if_open(state: _BaselineStreamState) -> None:
     """Emit a ``StreamReasoningEnd`` for any open reasoning block and rotate.
 
     A reasoning block must close before any text or tool_use starts, and
