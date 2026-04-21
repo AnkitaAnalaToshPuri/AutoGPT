@@ -1,13 +1,13 @@
 "use client";
 
-import type { CoPilotUsageStatus } from "@/app/api/__generated__/models/coPilotUsageStatus";
+import type { CoPilotUsagePublic } from "@/app/api/__generated__/models/coPilotUsagePublic";
 import { useGetV2GetCopilotUsage } from "@/app/api/__generated__/endpoints/chat/chat";
 import { toast } from "@/components/molecules/Toast/use-toast";
 import useCredits from "@/hooks/useCredits";
 import { Flag, useGetFlag } from "@/services/feature-flags/use-get-flag";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
-import { UploadSimple } from "@phosphor-icons/react";
+import { Flask, UploadSimple } from "@phosphor-icons/react";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatContainer } from "./components/ChatContainer/ChatContainer";
@@ -83,12 +83,18 @@ export function CopilotPage() {
     isSyncing,
     createSession,
     onSend,
+    onEnqueue,
+    queuedMessages,
     isLoadingSession,
     isSessionError,
     isCreatingSession,
     isUploadingFiles,
     isUserLoading,
     isLoggedIn,
+    // Pagination
+    hasMoreMessages,
+    isLoadingMore,
+    loadMore,
     // Mobile drawer
     isMobile,
     isDrawerOpen,
@@ -109,6 +115,8 @@ export function CopilotPage() {
     // Rate limit reset
     rateLimitMessage,
     dismissRateLimit,
+    // Dry run session state
+    sessionDryRun,
   } = useCopilotPage();
 
   const {
@@ -117,7 +125,7 @@ export function CopilotPage() {
     isError: usageError,
   } = useGetV2GetCopilotUsage({
     query: {
-      select: (res) => res.data as CoPilotUsageStatus,
+      select: (res) => res.data as CoPilotUsagePublic,
       refetchInterval: 30000,
       staleTime: 10000,
     },
@@ -170,6 +178,17 @@ export function CopilotPage() {
         >
           {isMobile && <MobileHeader onOpenDrawer={handleOpenDrawer} />}
           <NotificationBanner />
+          {/* Test mode banner: only shown when the CURRENT session is confirmed to be
+              a dry_run session via its immutable metadata. Never shown based on the
+              global isDryRun store preference alone — that only predicts future sessions
+              and would mislead users browsing non-dry-run sessions while the toggle is on.
+              The DryRunToggleButton (visible on new chats) already communicates the preference. */}
+          {sessionId && sessionDryRun && (
+            <div className="flex items-center justify-center gap-1.5 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
+              <Flask size={13} weight="bold" />
+              Test mode — this session runs agents as simulation
+            </div>
+          )}
           {/* Drop overlay */}
           <div
             className={cn(
@@ -196,7 +215,12 @@ export function CopilotPage() {
               onCreateSession={createSession}
               onSend={onSend}
               onStop={stop}
+              onEnqueue={onEnqueue}
+              queuedMessages={queuedMessages}
               isUploadingFiles={isUploadingFiles}
+              hasMoreMessages={hasMoreMessages}
+              isLoadingMore={isLoadingMore}
+              onLoadMore={loadMore}
               droppedFiles={droppedFiles}
               onDroppedFilesConsumed={handleDroppedFilesConsumed}
               historicalDurations={historicalDurations}
@@ -234,9 +258,7 @@ export function CopilotPage() {
         resetCost={resetCost ?? 0}
         resetMessage={rateLimitMessage ?? ""}
         isWeeklyExhausted={
-          hasUsage &&
-          usage.weekly.limit > 0 &&
-          usage.weekly.used >= usage.weekly.limit
+          hasUsage && !!usage.weekly && usage.weekly.percent_used >= 100
         }
         hasInsufficientCredits={hasInsufficientCredits}
         isBillingEnabled={isBillingEnabled}

@@ -24,7 +24,7 @@ from .rate_limit import (
     get_usage_status,
     get_user_tier,
     increment_daily_reset_count,
-    record_token_usage,
+    record_cost_usage,
     release_reset_lock,
     reset_daily_usage,
     reset_user_usage,
@@ -82,7 +82,7 @@ class TestGetUsageStatus:
             return_value=mock_redis,
         ):
             status = await get_usage_status(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
         assert isinstance(status, CoPilotUsageStatus)
@@ -98,7 +98,7 @@ class TestGetUsageStatus:
             side_effect=ConnectionError("Redis down"),
         ):
             status = await get_usage_status(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
         assert status.daily.used == 0
@@ -115,7 +115,7 @@ class TestGetUsageStatus:
             return_value=mock_redis,
         ):
             status = await get_usage_status(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
         assert status.daily.used == 0
@@ -132,7 +132,7 @@ class TestGetUsageStatus:
             return_value=mock_redis,
         ):
             status = await get_usage_status(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
         assert status.daily.used == 500
@@ -148,7 +148,7 @@ class TestGetUsageStatus:
             return_value=mock_redis,
         ):
             status = await get_usage_status(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
         now = datetime.now(UTC)
@@ -174,7 +174,7 @@ class TestCheckRateLimit:
         ):
             # Should not raise
             await check_rate_limit(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
     @pytest.mark.asyncio
@@ -188,7 +188,7 @@ class TestCheckRateLimit:
         ):
             with pytest.raises(RateLimitExceeded) as exc_info:
                 await check_rate_limit(
-                    _USER, daily_token_limit=10000, weekly_token_limit=50000
+                    _USER, daily_cost_limit=10000, weekly_cost_limit=50000
                 )
             assert exc_info.value.window == "daily"
 
@@ -203,7 +203,7 @@ class TestCheckRateLimit:
         ):
             with pytest.raises(RateLimitExceeded) as exc_info:
                 await check_rate_limit(
-                    _USER, daily_token_limit=10000, weekly_token_limit=50000
+                    _USER, daily_cost_limit=10000, weekly_cost_limit=50000
                 )
             assert exc_info.value.window == "weekly"
 
@@ -216,7 +216,7 @@ class TestCheckRateLimit:
         ):
             # Should not raise
             await check_rate_limit(
-                _USER, daily_token_limit=10000, weekly_token_limit=50000
+                _USER, daily_cost_limit=10000, weekly_cost_limit=50000
             )
 
     @pytest.mark.asyncio
@@ -229,15 +229,15 @@ class TestCheckRateLimit:
             return_value=mock_redis,
         ):
             # Should not raise — limits of 0 mean unlimited
-            await check_rate_limit(_USER, daily_token_limit=0, weekly_token_limit=0)
+            await check_rate_limit(_USER, daily_cost_limit=0, weekly_cost_limit=0)
 
 
 # ---------------------------------------------------------------------------
-# record_token_usage
+# record_cost_usage
 # ---------------------------------------------------------------------------
 
 
-class TestRecordTokenUsage:
+class TestRecordCostUsage:
     @staticmethod
     def _make_pipeline_mock() -> MagicMock:
         """Create a pipeline mock with sync methods and async execute."""
@@ -255,25 +255,38 @@ class TestRecordTokenUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await record_token_usage(_USER, prompt_tokens=100, completion_tokens=50)
+            await record_cost_usage(_USER, cost_microdollars=123_456)
 
-        # Should call incrby twice (daily + weekly) with total=150
+        # Should call incrby twice (daily + weekly) with the same cost
         incrby_calls = mock_pipe.incrby.call_args_list
         assert len(incrby_calls) == 2
-        assert incrby_calls[0].args[1] == 150  # daily
-        assert incrby_calls[1].args[1] == 150  # weekly
+        assert incrby_calls[0].args[1] == 123_456  # daily
+        assert incrby_calls[1].args[1] == 123_456  # weekly
 
     @pytest.mark.asyncio
-    async def test_skips_when_zero_tokens(self):
+    async def test_skips_when_cost_is_zero(self):
         mock_redis = AsyncMock()
 
         with patch(
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await record_token_usage(_USER, prompt_tokens=0, completion_tokens=0)
+            await record_cost_usage(_USER, cost_microdollars=0)
 
         # Should not call pipeline at all
+        mock_redis.pipeline.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_cost_is_negative(self):
+        """Negative costs are clamped to zero and skip the pipeline."""
+        mock_redis = AsyncMock()
+
+        with patch(
+            "backend.copilot.rate_limit.get_redis_async",
+            return_value=mock_redis,
+        ):
+            await record_cost_usage(_USER, cost_microdollars=-10)
+
         mock_redis.pipeline.assert_not_called()
 
     @pytest.mark.asyncio
@@ -287,7 +300,7 @@ class TestRecordTokenUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await record_token_usage(_USER, prompt_tokens=100, completion_tokens=50)
+            await record_cost_usage(_USER, cost_microdollars=5_000)
 
         expire_calls = mock_pipe.expire.call_args_list
         assert len(expire_calls) == 2
@@ -308,32 +321,7 @@ class TestRecordTokenUsage:
             side_effect=ConnectionError("Redis down"),
         ):
             # Should not raise
-            await record_token_usage(_USER, prompt_tokens=100, completion_tokens=50)
-
-    @pytest.mark.asyncio
-    async def test_cost_weighted_counting(self):
-        """Cached tokens should be weighted: cache_read=10%, cache_create=25%."""
-        mock_pipe = self._make_pipeline_mock()
-        mock_redis = AsyncMock()
-        mock_redis.pipeline = lambda **_kw: mock_pipe
-
-        with patch(
-            "backend.copilot.rate_limit.get_redis_async",
-            return_value=mock_redis,
-        ):
-            await record_token_usage(
-                _USER,
-                prompt_tokens=100,  # uncached → 100
-                completion_tokens=50,  # output → 50
-                cache_read_tokens=10000,  # 10% → 1000
-                cache_creation_tokens=400,  # 25% → 100
-            )
-
-        # Expected weighted total: 100 + 1000 + 100 + 50 = 1250
-        incrby_calls = mock_pipe.incrby.call_args_list
-        assert len(incrby_calls) == 2
-        assert incrby_calls[0].args[1] == 1250  # daily
-        assert incrby_calls[1].args[1] == 1250  # weekly
+            await record_cost_usage(_USER, cost_microdollars=5_000)
 
     @pytest.mark.asyncio
     async def test_handles_redis_error_during_pipeline_execute(self):
@@ -348,7 +336,7 @@ class TestRecordTokenUsage:
             return_value=mock_redis,
         ):
             # Should not raise — fail-open
-            await record_token_usage(_USER, prompt_tokens=100, completion_tokens=50)
+            await record_cost_usage(_USER, cost_microdollars=5_000)
 
 
 # ---------------------------------------------------------------------------
@@ -401,66 +389,49 @@ class TestGetUserTier:
         """Clear the get_user_tier cache before each test."""
         get_user_tier.cache_clear()  # type: ignore[attr-defined]
 
+    def _mock_user_db(
+        self, subscription_tier: str | None = None, raises: Exception | None = None
+    ):
+        """Return a patched user_db() whose get_user_by_id behaves as specified."""
+        mock_db = AsyncMock()
+        if raises is not None:
+            mock_db.get_user_by_id = AsyncMock(side_effect=raises)
+        else:
+            mock_user = MagicMock()
+            mock_user.subscription_tier = subscription_tier
+            mock_db.get_user_by_id = AsyncMock(return_value=mock_user)
+        return mock_db
+
     @pytest.mark.asyncio
     async def test_returns_tier_from_db(self):
         """Should return the tier stored in the user record."""
-        mock_user = MagicMock()
-        mock_user.subscriptionTier = "PRO"
-
-        mock_prisma = AsyncMock()
-        mock_prisma.find_unique = AsyncMock(return_value=mock_user)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma,
-        ):
+        mock_db = self._mock_user_db(subscription_tier="PRO")
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db):
             tier = await get_user_tier(_USER)
-
         assert tier == SubscriptionTier.PRO
 
     @pytest.mark.asyncio
     async def test_returns_default_when_user_not_found(self):
         """Should return DEFAULT_TIER when user is not in the DB."""
-        mock_prisma = AsyncMock()
-        mock_prisma.find_unique = AsyncMock(return_value=None)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma,
-        ):
+        mock_db = self._mock_user_db(raises=Exception("not found"))
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db):
             tier = await get_user_tier(_USER)
-
         assert tier == DEFAULT_TIER
 
     @pytest.mark.asyncio
     async def test_returns_default_when_tier_is_none(self):
-        """Should return DEFAULT_TIER when subscriptionTier is None."""
-        mock_user = MagicMock()
-        mock_user.subscriptionTier = None
-
-        mock_prisma = AsyncMock()
-        mock_prisma.find_unique = AsyncMock(return_value=mock_user)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma,
-        ):
+        """Should return DEFAULT_TIER when subscription_tier is None."""
+        mock_db = self._mock_user_db(subscription_tier=None)
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db):
             tier = await get_user_tier(_USER)
-
         assert tier == DEFAULT_TIER
 
     @pytest.mark.asyncio
     async def test_returns_default_on_db_error(self):
         """Should fall back to DEFAULT_TIER when DB raises."""
-        mock_prisma = AsyncMock()
-        mock_prisma.find_unique = AsyncMock(side_effect=Exception("DB down"))
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma,
-        ):
+        mock_db = self._mock_user_db(raises=Exception("DB down"))
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db):
             tier = await get_user_tier(_USER)
-
         assert tier == DEFAULT_TIER
 
     @pytest.mark.asyncio
@@ -470,26 +441,14 @@ class TestGetUserTier:
         Regression test: a transient DB failure previously cached DEFAULT_TIER
         for 5 minutes, incorrectly downgrading higher-tier users until expiry.
         """
-        failing_prisma = AsyncMock()
-        failing_prisma.find_unique = AsyncMock(side_effect=Exception("DB down"))
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=failing_prisma,
-        ):
+        failing_db = self._mock_user_db(raises=Exception("DB down"))
+        with patch("backend.copilot.rate_limit.user_db", return_value=failing_db):
             tier1 = await get_user_tier(_USER)
         assert tier1 == DEFAULT_TIER
 
         # Now DB recovers and returns PRO
-        mock_user = MagicMock()
-        mock_user.subscriptionTier = "PRO"
-        ok_prisma = AsyncMock()
-        ok_prisma.find_unique = AsyncMock(return_value=mock_user)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=ok_prisma,
-        ):
+        ok_db = self._mock_user_db(subscription_tier="PRO")
+        with patch("backend.copilot.rate_limit.user_db", return_value=ok_db):
             tier2 = await get_user_tier(_USER)
 
         # Should get PRO now — the error result was not cached
@@ -498,18 +457,9 @@ class TestGetUserTier:
     @pytest.mark.asyncio
     async def test_returns_default_on_invalid_tier_value(self):
         """Should fall back to DEFAULT_TIER when stored value is invalid."""
-        mock_user = MagicMock()
-        mock_user.subscriptionTier = "invalid-tier"
-
-        mock_prisma = AsyncMock()
-        mock_prisma.find_unique = AsyncMock(return_value=mock_user)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma,
-        ):
+        mock_db = self._mock_user_db(subscription_tier="invalid-tier")
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db):
             tier = await get_user_tier(_USER)
-
         assert tier == DEFAULT_TIER
 
     @pytest.mark.asyncio
@@ -522,26 +472,14 @@ class TestGetUserTier:
         stale cached FREE tier for up to 5 minutes.
         """
         # First call: user does not exist yet
-        missing_prisma = AsyncMock()
-        missing_prisma.find_unique = AsyncMock(return_value=None)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=missing_prisma,
-        ):
+        missing_db = self._mock_user_db(raises=Exception("not found"))
+        with patch("backend.copilot.rate_limit.user_db", return_value=missing_db):
             tier1 = await get_user_tier(_USER)
         assert tier1 == DEFAULT_TIER
 
         # Second call: user now exists with PRO tier
-        mock_user = MagicMock()
-        mock_user.subscriptionTier = "PRO"
-        ok_prisma = AsyncMock()
-        ok_prisma.find_unique = AsyncMock(return_value=mock_user)
-
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=ok_prisma,
-        ):
+        ok_db = self._mock_user_db(subscription_tier="PRO")
+        with patch("backend.copilot.rate_limit.user_db", return_value=ok_db):
             tier2 = await get_user_tier(_USER)
 
         # Should get PRO — the not-found result was not cached
@@ -598,20 +536,19 @@ class TestSetUserTier:
     @pytest.mark.asyncio
     async def test_cache_invalidated_after_set(self):
         """After set_user_tier, get_user_tier should query DB again (not cache)."""
-        # First, populate the cache with BUSINESS
+        # First, populate the cache with BUSINESS via user_db() mock
+        mock_db_biz = AsyncMock()
         mock_user_biz = MagicMock()
-        mock_user_biz.subscriptionTier = "BUSINESS"
-        mock_prisma_get = AsyncMock()
-        mock_prisma_get.find_unique = AsyncMock(return_value=mock_user_biz)
+        mock_user_biz.subscription_tier = "BUSINESS"
+        mock_db_biz.get_user_by_id = AsyncMock(return_value=mock_user_biz)
 
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma_get,
-        ):
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db_biz):
             tier_before = await get_user_tier(_USER)
         assert tier_before == SubscriptionTier.BUSINESS
 
-        # Now set tier to ENTERPRISE (this should invalidate the cache)
+        # Now set tier to ENTERPRISE via PrismaUser.prisma (set_user_tier still
+        # uses Prisma directly since it's only called from admin API where Prisma
+        # is connected).
         mock_prisma_set = AsyncMock()
         mock_prisma_set.update = AsyncMock(return_value=None)
 
@@ -622,18 +559,89 @@ class TestSetUserTier:
             await set_user_tier(_USER, SubscriptionTier.ENTERPRISE)
 
         # Now get_user_tier should hit DB again (cache was invalidated)
+        mock_db_ent = AsyncMock()
         mock_user_ent = MagicMock()
-        mock_user_ent.subscriptionTier = "ENTERPRISE"
-        mock_prisma_get2 = AsyncMock()
-        mock_prisma_get2.find_unique = AsyncMock(return_value=mock_user_ent)
+        mock_user_ent.subscription_tier = "ENTERPRISE"
+        mock_db_ent.get_user_by_id = AsyncMock(return_value=mock_user_ent)
 
-        with patch(
-            "backend.copilot.rate_limit.PrismaUser.prisma",
-            return_value=mock_prisma_get2,
-        ):
+        with patch("backend.copilot.rate_limit.user_db", return_value=mock_db_ent):
             tier_after = await get_user_tier(_USER)
 
         assert tier_after == SubscriptionTier.ENTERPRISE
+
+    @pytest.mark.asyncio
+    async def test_drift_check_swallows_launchdarkly_failure(self):
+        """LaunchDarkly price-id lookup failures inside the drift check must
+        never bubble up and 500 the admin tier write — the DB update is
+        already committed by the time we check drift."""
+        mock_prisma = AsyncMock()
+        mock_prisma.update = AsyncMock(return_value=None)
+
+        mock_user = MagicMock()
+        mock_user.stripe_customer_id = "cus_abc"
+
+        mock_sub = MagicMock()
+        mock_sub.id = "sub_abc"
+        mock_sub["items"].data = [MagicMock(price=MagicMock(id="price_mismatch"))]
+
+        with (
+            patch(
+                "backend.copilot.rate_limit.PrismaUser.prisma",
+                return_value=mock_prisma,
+            ),
+            patch(
+                "backend.copilot.rate_limit.get_user_by_id",
+                new_callable=AsyncMock,
+                return_value=mock_user,
+            ),
+            patch(
+                "backend.data.credit._get_active_subscription",
+                new_callable=AsyncMock,
+                return_value=mock_sub,
+            ),
+            patch(
+                "backend.data.credit.get_subscription_price_id",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("LD SDK not initialized"),
+            ),
+        ):
+            # Must NOT raise — drift check is best-effort diagnostic only.
+            await set_user_tier(_USER, SubscriptionTier.PRO)
+
+        mock_prisma.update.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_drift_check_timeout_is_bounded(self):
+        """A Stripe call that stalls on the 80s SDK default must not block the
+        admin tier write — set_user_tier wraps the drift check in a 5s timeout
+        and logs + returns on TimeoutError."""
+        import asyncio as _asyncio
+
+        mock_prisma = AsyncMock()
+        mock_prisma.update = AsyncMock(return_value=None)
+
+        async def _never_returns(_user_id: str, _tier):
+            await _asyncio.sleep(60)
+
+        with (
+            patch(
+                "backend.copilot.rate_limit.PrismaUser.prisma",
+                return_value=mock_prisma,
+            ),
+            patch(
+                "backend.copilot.rate_limit._warn_if_stripe_subscription_drifts",
+                side_effect=_never_returns,
+            ),
+            patch(
+                "backend.copilot.rate_limit.asyncio.wait_for",
+                new_callable=AsyncMock,
+                side_effect=_asyncio.TimeoutError,
+            ),
+        ):
+            await set_user_tier(_USER, SubscriptionTier.PRO)
+
+        # Set_user_tier still completed — the drift timeout did not propagate.
+        mock_prisma.update.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +807,7 @@ class TestTierLimitsRespected:
             assert tier == SubscriptionTier.PRO
             # Should NOT raise — 3M < 12.5M
             await check_rate_limit(
-                _USER, daily_token_limit=daily, weekly_token_limit=weekly
+                _USER, daily_cost_limit=daily, weekly_cost_limit=weekly
             )
 
     @pytest.mark.asyncio
@@ -833,7 +841,7 @@ class TestTierLimitsRespected:
             # Should raise — 2.5M >= 2.5M
             with pytest.raises(RateLimitExceeded):
                 await check_rate_limit(
-                    _USER, daily_token_limit=daily, weekly_token_limit=weekly
+                    _USER, daily_cost_limit=daily, weekly_cost_limit=weekly
                 )
 
     @pytest.mark.asyncio
@@ -865,7 +873,7 @@ class TestTierLimitsRespected:
             assert tier == SubscriptionTier.ENTERPRISE
             # Should NOT raise — 100M < 150M
             await check_rate_limit(
-                _USER, daily_token_limit=daily, weekly_token_limit=weekly
+                _USER, daily_cost_limit=daily, weekly_cost_limit=weekly
             )
 
 
@@ -892,7 +900,7 @@ class TestResetDailyUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            result = await reset_daily_usage(_USER, daily_token_limit=10000)
+            result = await reset_daily_usage(_USER, daily_cost_limit=10000)
 
         assert result is True
         mock_pipe.delete.assert_called_once()
@@ -908,7 +916,7 @@ class TestResetDailyUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await reset_daily_usage(_USER, daily_token_limit=10000)
+            await reset_daily_usage(_USER, daily_cost_limit=10000)
 
         mock_pipe.decrby.assert_called_once()
         mock_redis.set.assert_not_called()  # 35000 > 0, no clamp needed
@@ -924,14 +932,14 @@ class TestResetDailyUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await reset_daily_usage(_USER, daily_token_limit=10000)
+            await reset_daily_usage(_USER, daily_cost_limit=10000)
 
         mock_pipe.decrby.assert_called_once()
         mock_redis.set.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_weekly_reduction_when_daily_limit_zero(self):
-        """When daily_token_limit is 0, weekly counter should not be touched."""
+        """When daily_cost_limit is 0, weekly counter should not be touched."""
         mock_pipe = self._make_pipeline_mock()
         mock_pipe.execute = AsyncMock(return_value=[1])  # only delete result
         mock_redis = AsyncMock()
@@ -941,7 +949,7 @@ class TestResetDailyUsage:
             "backend.copilot.rate_limit.get_redis_async",
             return_value=mock_redis,
         ):
-            await reset_daily_usage(_USER, daily_token_limit=0)
+            await reset_daily_usage(_USER, daily_cost_limit=0)
 
         mock_pipe.delete.assert_called_once()
         mock_pipe.decrby.assert_not_called()
@@ -952,7 +960,7 @@ class TestResetDailyUsage:
             "backend.copilot.rate_limit.get_redis_async",
             side_effect=ConnectionError("Redis down"),
         ):
-            result = await reset_daily_usage(_USER, daily_token_limit=10000)
+            result = await reset_daily_usage(_USER, daily_cost_limit=10000)
 
         assert result is False
 
