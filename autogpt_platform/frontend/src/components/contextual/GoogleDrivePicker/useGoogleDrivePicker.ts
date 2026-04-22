@@ -19,7 +19,9 @@ import {
 } from "./helpers";
 import { okData } from "@/app/api/helpers";
 
-async function fetchPickerAccessToken(credentialId: string): Promise<string> {
+export async function fetchPickerAccessToken(
+  credentialId: string,
+): Promise<string> {
   const response = await postV1GetPickerToken("google", credentialId);
   const token = okData(response)?.access_token;
   if (!token) {
