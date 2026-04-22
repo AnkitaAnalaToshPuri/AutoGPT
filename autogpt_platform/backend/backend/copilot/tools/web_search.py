@@ -111,9 +111,7 @@ class WebSearchTool(BaseTool):
                 text={"max_characters": _SNIPPET_MAX_CHARS},
             )
         except Exception as exc:
-            logger.warning(
-                "[web_search] Exa call failed for query=%r: %s", query, exc
-            )
+            logger.warning("[web_search] Exa call failed for query=%r: %s", query, exc)
             return ErrorResponse(
                 message=f"Web search failed: {exc}",
                 error="web_search_failed",

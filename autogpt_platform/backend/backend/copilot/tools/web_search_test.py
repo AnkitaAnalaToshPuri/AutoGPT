@@ -15,11 +15,7 @@ import pytest
 from backend.copilot.model import ChatSession
 
 from .models import ErrorResponse, WebSearchResponse, WebSearchResult
-from .web_search import (
-    WebSearchTool,
-    _extract_cost_usd,
-    _extract_results,
-)
+from .web_search import WebSearchTool, _extract_cost_usd, _extract_results
 
 
 def _fake_exa_response(
@@ -148,9 +144,7 @@ class TestWebSearchToolDispatch:
 
         monkeypatch.setattr(
             "backend.copilot.tools.web_search.Settings",
-            lambda: SimpleNamespace(
-                secrets=SimpleNamespace(exa_api_key="exa-test")
-            ),
+            lambda: SimpleNamespace(secrets=SimpleNamespace(exa_api_key="exa-test")),
         )
 
         with (
@@ -217,9 +211,7 @@ class TestWebSearchToolDispatch:
     async def test_empty_query_rejected_without_api_call(self, monkeypatch):
         monkeypatch.setattr(
             "backend.copilot.tools.web_search.Settings",
-            lambda: SimpleNamespace(
-                secrets=SimpleNamespace(exa_api_key="exa-test")
-            ),
+            lambda: SimpleNamespace(secrets=SimpleNamespace(exa_api_key="exa-test")),
         )
         exa_stub = AsyncMock()
         with patch(
