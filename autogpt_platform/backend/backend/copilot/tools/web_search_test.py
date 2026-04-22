@@ -28,6 +28,8 @@ def _fake_anthropic_response(
     search_requests: int = 1,
     input_tokens: int = 120,
     output_tokens: int = 40,
+    cache_read_input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
 ) -> SimpleNamespace:
     """Build a synthetic Anthropic Messages response.
 
@@ -55,6 +57,8 @@ def _fake_anthropic_response(
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
         server_tool_use=SimpleNamespace(web_search_requests=search_requests),
     )
     return SimpleNamespace(content=content, usage=usage)
@@ -161,6 +165,33 @@ class TestEstimateCostUsd:
         cost = _estimate_cost_usd(resp, search_requests=3)
         assert cost == pytest.approx(3 * _COST_PER_SEARCH_USD)
 
+    def test_cache_tokens_billed_distinctly(self):
+        # 1M fresh-input tokens vs 1M cache-read vs 1M cache-write should
+        # produce three distinct line items — miscounting any of them would
+        # under- or over-bill users at the daily/weekly budget gate.
+        fresh = _fake_anthropic_response(
+            search_requests=0, input_tokens=1_000_000, output_tokens=0
+        )
+        cache_read = _fake_anthropic_response(
+            search_requests=0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_input_tokens=1_000_000,
+        )
+        cache_write = _fake_anthropic_response(
+            search_requests=0,
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_input_tokens=1_000_000,
+        )
+        c_fresh = _estimate_cost_usd(fresh, search_requests=0)
+        c_read = _estimate_cost_usd(cache_read, search_requests=0)
+        c_write = _estimate_cost_usd(cache_write, search_requests=0)
+        # Read is discounted (~10% of fresh), write is a premium (~1.25x).
+        assert c_read < c_fresh < c_write
+        assert c_read == pytest.approx(c_fresh * 0.12, rel=0.05)
+        assert c_write == pytest.approx(c_fresh * 1.2, rel=0.05)
+
 
 class TestWebSearchToolDispatch:
     """Lightweight integration test: mock the Anthropic client, confirm
@@ -232,7 +263,7 @@ class TestWebSearchToolDispatch:
         assert mock_track.await_count == 1
         kwargs = mock_track.await_args.kwargs
         assert kwargs["provider"] == "anthropic"
-        assert kwargs["model"] == "claude-haiku-4-5"
+        assert kwargs["model"] == "claude-haiku-3-5"
         assert kwargs["user_id"] == "u1"
         assert kwargs["cost_usd"] >= _COST_PER_SEARCH_USD
 

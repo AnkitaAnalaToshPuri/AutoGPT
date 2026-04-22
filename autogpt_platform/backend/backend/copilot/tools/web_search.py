@@ -20,7 +20,7 @@ from .models import ErrorResponse, ToolResponseBase, WebSearchResponse, WebSearc
 
 logger = logging.getLogger(__name__)
 
-_WEB_SEARCH_DISPATCH_MODEL = "claude-haiku-4-5"
+_WEB_SEARCH_DISPATCH_MODEL = "claude-haiku-3-5"
 _MAX_DISPATCH_TOKENS = 512
 _DEFAULT_MAX_RESULTS = 5
 _HARD_MAX_RESULTS = 20
@@ -206,19 +206,33 @@ def _extract_results(resp: Any, *, limit: int) -> tuple[list[WebSearchResult], i
 
 
 # Update when Anthropic revises pricing.
+# Claude Haiku 3.5 rates: https://platform.claude.com/docs/en/about-claude/pricing
 _COST_PER_SEARCH_USD = 0.010  # $10 per 1,000 web_search requests
-_HAIKU_INPUT_USD_PER_MTOK = 1.0
-_HAIKU_OUTPUT_USD_PER_MTOK = 5.0
+_HAIKU_INPUT_USD_PER_MTOK = 0.25
+_HAIKU_CACHE_READ_USD_PER_MTOK = 0.03  # 10% of input
+_HAIKU_CACHE_WRITE_USD_PER_MTOK = 0.30  # 1.25x input, 5m TTL
+_HAIKU_OUTPUT_USD_PER_MTOK = 1.25
 
 
 def _estimate_cost_usd(resp: Any, *, search_requests: int) -> float:
-    """Per-search fee × count + Haiku dispatch tokens."""
+    """Per-search fee × count + Haiku dispatch tokens (cache-aware).
+
+    Anthropic's ``usage.input_tokens`` excludes cache reads and writes, so
+    the three buckets are billed at distinct rates.  Missing fields default
+    to zero — for example older response shapes without ``cache_*`` markers
+    simply bill only the fresh-input line.
+    """
     usage = getattr(resp, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) if usage else 0
     output_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) if usage else 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) if usage else 0
 
     search_cost = search_requests * _COST_PER_SEARCH_USD
-    inference_cost = (input_tokens / 1_000_000) * _HAIKU_INPUT_USD_PER_MTOK + (
-        output_tokens / 1_000_000
-    ) * _HAIKU_OUTPUT_USD_PER_MTOK
+    inference_cost = (
+        (input_tokens / 1_000_000) * _HAIKU_INPUT_USD_PER_MTOK
+        + (cache_read / 1_000_000) * _HAIKU_CACHE_READ_USD_PER_MTOK
+        + (cache_write / 1_000_000) * _HAIKU_CACHE_WRITE_USD_PER_MTOK
+        + (output_tokens / 1_000_000) * _HAIKU_OUTPUT_USD_PER_MTOK
+    )
     return round(search_cost + inference_cost, 6)
