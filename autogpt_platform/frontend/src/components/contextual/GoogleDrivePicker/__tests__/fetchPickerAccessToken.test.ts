@@ -40,7 +40,9 @@ describe("fetchPickerAccessToken", () => {
     // empty string to the Google Picker.
     mockPost.mockResolvedValue({
       status: 400,
-      data: { detail: "Picker tokens are only available for OAuth2 credentials" },
+      data: {
+        detail: "Picker tokens are only available for OAuth2 credentials",
+      },
     });
 
     await expect(fetchPickerAccessToken("cred-456")).rejects.toThrow(
