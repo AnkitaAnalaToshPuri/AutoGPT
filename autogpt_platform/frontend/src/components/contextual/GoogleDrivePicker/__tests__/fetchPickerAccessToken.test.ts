@@ -8,7 +8,7 @@ vi.mock("@/app/api/__generated__/endpoints/integrations/integrations", () => ({
 import { postV1GetPickerToken } from "@/app/api/__generated__/endpoints/integrations/integrations";
 import { fetchPickerAccessToken } from "../useGoogleDrivePicker";
 
-const mockPost = postV1GetPickerToken as unknown as ReturnType<typeof vi.fn>;
+const mockPost = vi.mocked(postV1GetPickerToken);
 
 afterEach(() => {
   mockPost.mockReset();
